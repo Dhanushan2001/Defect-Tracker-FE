@@ -1,33 +1,24 @@
-import { mockDb } from "../../mock/mockData";
+import apiClient from "../../lib/api";
+import { ENDPOINTS } from "../../utils/apiendpoint";
 
 export interface UpdateUserPayload {
-  id: number;
-  userId: number;
+  id?: number;
+  userId?: number;
   firstName: string;
   lastName: string;
   email: string;
   contactNo?: string;
   joinDate?: string;
-  gender?: "Male" | "Female";
+  gender?: "Male" | "Female" | string;
   designationId?: number;
 }
 
 export async function updateUser(id: number, userData: UpdateUserPayload) {
-  const updated = mockDb.updateUser(id, userData);
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'User updated successfully',
-    data: updated,
-  };
+  const response = await apiClient.put(ENDPOINTS.employeeById(id), userData);
+  return response.data;
 }
 
 export async function updateUserStatus(id: number, status: boolean) {
-  const updated = mockDb.updateUser(id, { userStatus: status ? 'ACTIVE' : 'INACTIVE' });
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'User status updated successfully',
-    data: updated,
-  };
+  const response = await apiClient.put(ENDPOINTS.employeeStatus(id), { status });
+  return response.data;
 }

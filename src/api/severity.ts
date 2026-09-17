@@ -1,21 +1,27 @@
-import { mockDb } from "../mock/mockData";
+import apiClient from "../lib/api";
+import { ENDPOINTS } from "../utils/apiendpoint";
 
 export interface Severity {
   id: number;
   name: string;
+  severityName?: string;
   color: string;
   weight: number;
+  description?: string;
 }
 
 export interface CreateSeverityRequest {
   name: string;
+  severityName?: string;
   color: string;
   weight: number;
+  description?: string;
 }
 
 export interface CreateSeverityResponse {
   status: string;
   message: string;
+  statusMessage?: string;
   statusCode: number;
   data?: Severity;
 }
@@ -23,6 +29,7 @@ export interface CreateSeverityResponse {
 export interface GetSeveritiesResponse {
   status: string;
   message: string;
+  statusMessage?: string;
   data: {
     content: Severity[];
     totalElements: number;
@@ -33,48 +40,41 @@ export interface GetSeveritiesResponse {
 }
 
 export const createSeverity = async (data: CreateSeverityRequest): Promise<CreateSeverityResponse> => {
-  const created = mockDb.createSeverity(data);
-  return {
-    status: 'success',
-    message: 'Severity created successfully',
-    statusCode: 200,
-    data: { id: created.id, name: created.severityName, color: created.color, weight: created.weight },
-  };
+  const response = await apiClient.post(ENDPOINTS.severity, data);
+  return response.data;
 };
 
 export const updateSeverity = async (id: number, data: Partial<CreateSeverityRequest>): Promise<CreateSeverityResponse> => {
-  const updated = mockDb.updateSeverity(id, data);
-  return {
-    status: 'success',
-    message: 'Severity updated successfully',
-    statusCode: 200,
-    data: updated ? { id: updated.id, name: updated.severityName, color: updated.color, weight: updated.weight } : undefined,
-  };
+  const response = await apiClient.put(ENDPOINTS.severityById(id), data);
+  return response.data;
 };
 
 export const getSeverities = async (
-  _page: number = 0,
-  _pageSize: number = 100
+  page?: number,
+  pageSize?: number
 ): Promise<GetSeveritiesResponse> => {
-  const severities = mockDb.getSeverities();
-  return {
-    status: 'success',
-    message: 'Severities fetched successfully',
-    data: {
-      content: severities.map(s => ({ id: s.id, name: s.severityName, color: s.color, weight: s.weight })),
-      totalElements: severities.length,
-      totalPages: 1,
-      size: 100,
-      number: 0,
-    },
-  };
+  const url = (page !== undefined && pageSize !== undefined)
+    ? ENDPOINTS.severityPagination(page, pageSize)
+    : ENDPOINTS.severity;
+  const response = await apiClient.get(url);
+  const data = response.data;
+  if (data && data.data && Array.isArray(data.data)) {
+    return {
+      ...data,
+      data: {
+        content: data.data,
+        totalElements: data.data.length,
+        totalPages: 1,
+        size: data.data.length,
+        number: 0,
+      }
+    };
+  }
+  return data;
 };
 
 export const deleteSeverity = async (id: number) => {
-  mockDb.deleteSeverity(id);
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'Severity deleted successfully',
-  };
+  const response = await apiClient.delete(ENDPOINTS.severityById(id));
+  return response.data;
 };
+

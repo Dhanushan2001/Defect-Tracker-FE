@@ -1,4 +1,5 @@
-import { mockDb } from "../mock/mockData";
+import apiClient from "../lib/api";
+import { ENDPOINTS } from "../utils/apiendpoint";
 
 interface WorkflowNodeRequest {
   id: number;
@@ -23,13 +24,19 @@ export interface SaveWorkflowResponse {
   statusCode: number;
 }
 
-interface StatusInfo {
+export interface StatusInfo {
   id: number;
   name: string;
+  statusName?: string;
   color: string;
+  colorCode?: string;
+  type?: string;
+  statusType?: string;
+  positionX?: number;
+  positionY?: number;
 }
 
-interface WorkflowTransitionResponse {
+export interface WorkflowTransitionResponse {
   id: number;
   fromStatus: StatusInfo;
   toStatus: StatusInfo;
@@ -50,44 +57,38 @@ export interface NextStatusResponse {
 }
 
 export const getAllWorkflows = async (): Promise<GetAllWorkflowsResponse> => {
-  const statuses = mockDb.getStatuses();
-  const transitions: WorkflowTransitionResponse[] = [];
-  
-  for (let i = 0; i < statuses.length - 1; i++) {
-    transitions.push({
-      id: i + 1,
-      fromStatus: { id: statuses[i].id, name: statuses[i].statusName, color: statuses[i].color },
-      toStatus: { id: statuses[i + 1].id, name: statuses[i + 1].statusName, color: statuses[i + 1].color },
-    });
-  }
-
+  const response = await apiClient.get(ENDPOINTS.workflow);
+  const data = response.data;
   return {
-    status: 'success',
-    statusMessage: 'Workflows fetched successfully',
-    statusCode: 200,
-    data: transitions,
+    status: data.status || "success",
+    statusMessage: data.statusMessage || data.message || "Workflows fetched successfully",
+    statusCode: data.statusCode || 200,
+    data: Array.isArray(data.data) ? data.data : [],
   };
 };
 
-export const saveWorkflow = async (workflowData: SaveWorkflowRequest): Promise<SaveWorkflowResponse> => {
+export const saveWorkflow = async (
+  workflowData: SaveWorkflowRequest
+): Promise<SaveWorkflowResponse> => {
+  const response = await apiClient.post(ENDPOINTS.workflow, workflowData);
+  const data = response.data;
   return {
-    status: 'success',
-    statusMessage: 'Workflow saved successfully',
-    statusCode: 200,
-    data: workflowData,
+    status: data.status || "success",
+    statusMessage: data.statusMessage || data.message || "Workflow saved successfully",
+    statusCode: data.statusCode || 200,
+    data: data.data,
   };
 };
 
 export const getNextStatuses = async (
   fromStatusId: number
 ): Promise<NextStatusResponse> => {
-  const statuses = mockDb.getStatuses();
-  const filtered = statuses.filter(s => s.id !== fromStatusId);
-
+  const response = await apiClient.get(ENDPOINTS.workflowNextStatus(fromStatusId));
+  const data = response.data;
   return {
-    status: 'success',
-    statusMessage: 'Next statuses fetched',
-    statusCode: 200,
-    data: filtered.map(s => ({ id: s.id, name: s.statusName, color: s.color })),
+    status: data.status || "success",
+    statusMessage: data.statusMessage || data.message || "Next statuses fetched",
+    statusCode: data.statusCode || 200,
+    data: Array.isArray(data.data) ? data.data : [],
   };
 };

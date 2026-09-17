@@ -1,11 +1,7 @@
-import { mockDb } from "../../mock/mockData";
+import apiClient from "../../lib/api";
+import { ENDPOINTS } from "../../utils/apiendpoint";
 
-export const updateRole = async (id: number, data: { name: string; type?: string }) => {
-  const updated = mockDb.updateRole(id, data.name);
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'Role updated successfully',
-    data: updated ? { id: updated.id, name: updated.roleName } : null,
-  };
-};
+export const updateRole = async (id: number, data: { name: string; type?: string; description?: string }) => {
+  const response = await apiClient.put(ENDPOINTS.roleById(id), data);
+  return response.data;
+};

@@ -1,5 +1,5 @@
 import React, { useState, useMemo, useEffect } from "react";
-import { UserCheck, Calendar, Filter } from "lucide-react";
+import { UserCheck, Calendar, Filter, Search } from "lucide-react";
 import { Card, CardContent, CardHeader } from "../components/ui/Card";
 import { Button } from "../components/ui/Button";
 import { Input } from "../components/ui/Input";
@@ -16,8 +16,10 @@ import { DonutChart } from "../components/ui/DonutChart";
 import { SearchableMultiSelect } from "../components/ui/SearchableMultiSelect";
 import { useNavigate } from "react-router-dom";
 import { getBenchList, getEmployeeProjectHistory } from "../api/bench/bench";
+import { getDesignations } from "../api/designation/designation";
 import { usePermission } from "../context/PermissionContext";
 import { OrbitProgress } from 'react-loading-indicators';
+
 interface BenchEmployee {
   id: string;
   firstName: string;
@@ -35,6 +37,9 @@ export const Bench: React.FC = () => {
   const navigate = useNavigate();
   
   const [employees, setEmployees] = useState<BenchEmployee[]>([]);
+  const [configuredDesignations, setConfiguredDesignations] = useState<
+    { id: number; name: string }[]
+  >([]);
   const [isEmployeeModalOpen, setIsEmployeeModalOpen] = useState(false);
   const [viewingEmployee, setViewingEmployee] = useState<BenchEmployee | null>(
     null,
@@ -47,41 +52,80 @@ export const Bench: React.FC = () => {
     toDate: "",
   });
   const [dateError, setDateError] = useState("");
-  const [loading, setLoading] = useState(false)
+  const [loading, setLoading] = useState(false);
 
   const [currentPage, setCurrentPage] = useState(1);
   const [pageSize, setPageSize] = useState(10);
 
-  const {can} = usePermission();
+  const { can } = usePermission();
 
-  // All unique designations from employee list
+  const loadDesignations = async () => {
+    try {
+      const res = await getDesignations();
+      const list = Array.isArray(res?.data)
+        ? res.data
+        : Array.isArray(res?.data?.content)
+        ? res.data.content
+        : Array.isArray(res)
+        ? res
+        : [];
+      const mapped = list
+        .map((d: any) => ({
+          id: d.id,
+          name: d.name || d.designationName || "",
+        }))
+        .filter((d: any) => Boolean(d.name));
+
+      const unique = mapped.filter(
+        (value: any, index: number, self: any[]) =>
+          index ===
+          self.findIndex(
+            (t) => t.name.toLowerCase() === value.name.toLowerCase(),
+          ),
+      );
+      setConfiguredDesignations(unique);
+    } catch (e) {
+      console.error("Failed to load designations:", e);
+    }
+  };
+
+  // Combine designations from configuration and employees
   const allDesignations = useMemo(() => {
-    const names = [
-      ...new Set(employees.map((e) => e.designation).filter(Boolean)),
-    ];
-    return names.map((name, i) => ({ id: i + 1, name }));
-  }, [employees]);
+    const names = new Set<string>();
+    configuredDesignations.forEach((d) => {
+      if (d.name) names.add(d.name);
+    });
+    employees.forEach((e) => {
+      if (e.designation && e.designation !== "-") names.add(e.designation);
+    });
+    return Array.from(names).map((name, i) => ({ id: i + 1, name }));
+  }, [configuredDesignations, employees]);
 
   const getAllBenchList = async () => {
     try {
-      setLoading(true)
+      setLoading(true);
       const response = await getBenchList();
 
-      const activeEmployees = response.filter(
-        (item: any) => item.employee?.active === true,
-      );
+      const activeItems = (response || []).filter((item: any) => {
+        const emp = item.employee || item;
+        const isActive =
+          emp.isActive !== undefined
+            ? emp.isActive
+            : emp.active !== undefined
+            ? emp.active
+            : true;
+        return isActive === true;
+      });
 
       const mappedEmployees = await Promise.all(
-        activeEmployees.map(async (item: any) => {
+        activeItems.map(async (item: any) => {
+          const emp = item.employee || item;
+          const empId = String(emp.id || item.id);
           let currentProjects: any[] = [];
 
           try {
-            const allocationResponse = await getEmployeeProjectHistory(
-              String(item.employee.id),
-            );
-
+            const allocationResponse = await getEmployeeProjectHistory(empId);
             const allocations = allocationResponse?.data || [];
-
             const uniqueProjectMap = new Map<string, any>();
 
             allocations.forEach((alloc: any) => {
@@ -110,16 +154,35 @@ export const Bench: React.FC = () => {
             currentProjects = [];
           }
 
+          const rawAvail = item.availability ?? emp.availability;
+          const availability =
+            rawAvail !== undefined && rawAvail !== null
+              ? Number(rawAvail)
+              : 100;
+          const currentYear = new Date().getFullYear();
+          const joinDate = emp.joinDate || item.benchStartDate || "2026-01-01";
+          const availabilityPeriod =
+            item.availabilityPeriod || `${joinDate} to ${currentYear}-12-31`;
+
           return {
-            id: String(item.employee.id),
-            firstName: item.employee.firstName,
-            lastName: item.employee.lastName,
-            email: item.employee.email,
-            phone: item.employee.contactNo,
-            designation: item.employee.designationName,
-            availability: item.availability,
-            availabilityPeriod: item.availabilityPeriod,
-            status: item.employee.active ? "Active" : "Inactive",
+            id: empId,
+            firstName: emp.firstName || item.firstName || "",
+            lastName: emp.lastName || item.lastName || "",
+            email: emp.email || item.email || "",
+            phone:
+              emp.contactNo ||
+              emp.phone ||
+              item.phone ||
+              item.contactNo ||
+              "",
+            designation:
+              emp.designationName ||
+              item.designationName ||
+              item.designation ||
+              "-",
+            availability: isNaN(availability) ? 100 : availability,
+            availabilityPeriod,
+            status: "Active",
             currentProjects,
           };
         }),
@@ -129,15 +192,15 @@ export const Bench: React.FC = () => {
     } catch (error) {
       console.error("Error loading bench list:", error);
       setEmployees([]);
-      setLoading(false)
     } finally {
-      setLoading(false)
+      setLoading(false);
     }
   };
 
   useEffect(() => {
     localStorage.removeItem("selectedProjectId");
     getAllBenchList();
+    loadDesignations();
   }, []);
 
   function isDateInAvailablePeriod(
@@ -146,44 +209,72 @@ export const Bench: React.FC = () => {
     toDate: string,
   ) {
     if (!fromDate && !toDate) return true;
-    if (!availabilityPeriod) return false;
+    if (!availabilityPeriod || availabilityPeriod === "N/A") return true;
 
-    const availableDate = new Date(availabilityPeriod);
+    let pStart: Date;
+    let pEnd: Date;
 
-    if (isNaN(availableDate.getTime())) return false;
+    if (availabilityPeriod.includes(" to ")) {
+      const [startStr, endStr] = availabilityPeriod.split(" to ");
+      pStart = new Date(startStr.trim());
+      pEnd = new Date(endStr.trim());
+    } else if (availabilityPeriod.includes(" - ")) {
+      const [startStr, endStr] = availabilityPeriod.split(" - ");
+      pStart = new Date(startStr.trim());
+      pEnd = new Date(endStr.trim());
+    } else {
+      pStart = new Date(availabilityPeriod.trim());
+      pEnd = new Date(availabilityPeriod.trim());
+    }
 
-    const selectedFrom = fromDate ? new Date(fromDate) : availableDate;
-    const selectedTo = toDate ? new Date(toDate) : availableDate;
+    if (isNaN(pStart.getTime())) return true;
+    if (isNaN(pEnd.getTime())) pEnd = pStart;
 
-    return availableDate >= selectedFrom && availableDate <= selectedTo;
+    const filterFrom = fromDate ? new Date(fromDate) : null;
+    const filterTo = toDate ? new Date(toDate) : null;
+
+    if (filterFrom && pEnd < filterFrom) return false;
+    if (filterTo && pStart > filterTo) return false;
+
+    return true;
   }
 
   const filteredEmployees = useMemo(() => {
     let filtered = employees.filter((emp) => emp.availability > 0);
+
     if (filters.name.trim()) {
       const nameFilter = filters.name.trim().toLowerCase();
       filtered = filtered.filter((emp) => {
         const full = `${emp.firstName} ${emp.lastName}`.toLowerCase();
+        const empIdStr = `emp${String(emp.id).padStart(4, "0")}`;
         return (
-          full.startsWith(nameFilter) ||
-          emp.firstName.toLowerCase().startsWith(nameFilter) ||
-          emp.lastName.toLowerCase().startsWith(nameFilter)
+          full.includes(nameFilter) ||
+          emp.firstName.toLowerCase().includes(nameFilter) ||
+          emp.lastName.toLowerCase().includes(nameFilter) ||
+          (emp.email && emp.email.toLowerCase().includes(nameFilter)) ||
+          String(emp.id).includes(nameFilter) ||
+          empIdStr.includes(nameFilter)
         );
       });
     }
+
     if (filters.designation && filters.designation.length > 0) {
       filtered = filtered.filter((emp) =>
-        filters.designation.includes(emp.designation),
+        filters.designation.some(
+          (d) => d.toLowerCase() === (emp.designation || "").toLowerCase(),
+        ),
       );
     }
+
     if (
       filters.availability &&
       filters.availability !== "All Availability" &&
       filters.availability !== ""
     ) {
-      const minAvail = parseInt(filters.availability);
-      if (!isNaN(minAvail))
+      const minAvail = parseInt(filters.availability, 10);
+      if (!isNaN(minAvail)) {
         filtered = filtered.filter((emp) => emp.availability >= minAvail);
+      }
     }
 
     if (filters.fromDate || filters.toDate) {
@@ -195,11 +286,17 @@ export const Bench: React.FC = () => {
         ),
       );
     }
-    return filtered.sort((a, b) =>
-      `${a.firstName} ${a.lastName}`.localeCompare(
+
+    return filtered.sort((a, b) => {
+      const idA = Number(a.id);
+      const idB = Number(b.id);
+      if (!isNaN(idA) && !isNaN(idB)) {
+        return idA - idB;
+      }
+      return `${a.firstName} ${a.lastName}`.localeCompare(
         `${b.firstName} ${b.lastName}`,
-      ),
-    );
+      );
+    });
   }, [employees, filters]);
 
   const totalPages = Math.ceil(filteredEmployees.length / pageSize);
@@ -262,8 +359,9 @@ export const Bench: React.FC = () => {
         <CardContent className="p-4">
           <div className="flex flex-wrap items-center gap-4">
             <div className="relative flex-1 min-w-[240px]">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 w-4 h-4 text-gray-400 pointer-events-none" />
               <Input
-                placeholder="Search by name..."
+                placeholder="Search by name, email or ID..."
                 value={filters.name}
                 onChange={(e) => handleFilterChange("name", e.target.value)}
                 className="pl-10"
@@ -279,7 +377,7 @@ export const Bench: React.FC = () => {
               placeholder={
                 allDesignations.length > 0
                   ? "All Designations"
-                  : "No designations"
+                  : "Loading designations..."
               }
               className="min-w-[200px]"
             />
@@ -330,6 +428,7 @@ export const Bench: React.FC = () => {
                   toDate: "",
                 });
                 setDateError("");
+                setCurrentPage(1);
               }}
               className="px-4 py-2"
             >
@@ -435,10 +534,13 @@ export const Bench: React.FC = () => {
                               <div>
                                 <button
                                     onClick={() => handleViewEmployee(employee)}
-                                    className="font-semibold text-blue-600 hover:text-blue-800 transition-colors duration-200"
+                                    className="font-semibold text-blue-600 hover:text-blue-800 transition-colors duration-200 block text-left"
                                 >
                                   {employee.firstName} {employee.lastName}
                                 </button>
+                                <span className="text-xs text-gray-500">
+                                  EMP{String(employee.id).padStart(4, "0")} • {employee.email}
+                                </span>
                               </div>
                             </div>
                           </TableCell>

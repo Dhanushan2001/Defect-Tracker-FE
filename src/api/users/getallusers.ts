@@ -1,4 +1,5 @@
-import { mockDb } from "../../mock/mockData";
+import apiClient from "../../lib/api";
+import { ENDPOINTS } from "../../utils/apiendpoint";
 
 export interface SimpleUser {
   id: number;
@@ -7,6 +8,11 @@ export interface SimpleUser {
   lastName: string;
   designationId?: number;
   designationName?: string;
+  gender?: string;
+  email?: string;
+  contactNo?: string;
+  joinDate?: string;
+  isActive?: boolean;
 }
 
 interface GetUsersByDesignationResponse {
@@ -15,51 +21,41 @@ interface GetUsersByDesignationResponse {
 }
 
 export async function getAllUsers(page: number = 0, size: number = 10) {
-  const users = mockDb.getUsers();
-  const start = page * size;
-  const paged = users.slice(start, start + size);
-
-  return {
-    status: 'success',
-    statusCode: 200,
-    data: {
-      content: paged,
-      totalElements: users.length,
-      totalPages: Math.ceil(users.length / size),
-      size,
-      number: page,
-    },
-  };
+  const response = await apiClient.get(
+    `${ENDPOINTS.employee}?page=${page}&size=${size}&sort=id&direction=ASC`
+  );
+  return response.data;
 }
 
 export async function getAllUsersSimple() {
-  const users = mockDb.getUsers();
+  const response = await apiClient.get(`${ENDPOINTS.employee}?sort=id&direction=ASC`);
+  const data = response.data;
+  const list = Array.isArray(data.data)
+    ? data.data
+    : Array.isArray(data.data?.content)
+    ? data.data.content
+    : [];
+
+  list.sort((a: any, b: any) => Number(a.id) - Number(b.id));
+
   return {
-    status: 'success',
-    statusCode: 200,
-    data: users.map(u => ({
-      id: u.id,
-      userId: u.userId,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      designationId: u.designationId,
-      designationName: u.designationName,
-    })),
+    status: data.status || "success",
+    statusCode: data.statusCode || 200,
+    data: list,
   };
 }
 
-export async function getUsersByDesignationId(designationId: number): Promise<GetUsersByDesignationResponse> {
-  const users = mockDb.getUsers().filter(u => u.designationId === Number(designationId));
+export async function getUsersByDesignationId(
+  designationId: number
+): Promise<GetUsersByDesignationResponse> {
+  const response = await getAllUsersSimple();
+  const list = Array.isArray(response.data) ? response.data : [];
+  const filtered = list.filter(
+    (u: any) => Number(u.designationId) === Number(designationId)
+  );
   return {
-    status: 'success',
-    data: users.map(u => ({
-      id: u.id,
-      userId: u.userId,
-      firstName: u.firstName,
-      lastName: u.lastName,
-      designationId: u.designationId,
-      designationName: u.designationName,
-    })),
+    status: "success",
+    data: filtered,
   };
 }
 

@@ -1,20 +1,24 @@
-import { mockDb } from "../mock/mockData";
+import apiClient from "../lib/api";
+import { ENDPOINTS } from "../utils/apiendpoint";
 
 export interface ApiDefectType {
   id: number;
+  name: string;
   defectTypeName: string;
-  description: string;
-  category: 'functional' | 'performance' | 'security' | 'usability' | 'compatibility' | 'other';
-  severity: 'low' | 'medium' | 'high' | 'critical';
-  priority: 'low' | 'medium' | 'high' | 'critical';
-  isActive: boolean;
-  createdAt: string;
-  updatedAt: string;
+  description?: string;
+  category?: string;
+  severity?: string;
+  priority?: string;
+  isActive?: boolean;
+  createdAt?: string;
+  updatedAt?: string;
 }
 
 export interface GetDefectTypesResponse {
   status: string;
   message: string;
+  statusMessage?: string;
+  statusCode?: number;
   data: {
     content: ApiDefectType[];
     totalElements: number;
@@ -24,57 +28,42 @@ export interface GetDefectTypesResponse {
   };
 }
 
-export const createDefectType = async (data: { name: string }) => {
-  const created = mockDb.createDefectType(data.name);
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'Defect type created successfully',
-    data: { id: created.id, name: created.defectTypeName },
-  };
+export const getDefectTypes = async (page?: number, size?: number): Promise<GetDefectTypesResponse> => {
+  const url = (page !== undefined && size !== undefined)
+    ? `${ENDPOINTS.defectType}?page=${page}&size=${size}&sort=id&direction=ASC`
+    : ENDPOINTS.defectType;
+  const response = await apiClient.get(url);
+  const data = response.data;
+  if (data && data.data && Array.isArray(data.data)) {
+    return {
+      ...data,
+      data: {
+        content: data.data.map((item: any) => ({
+          ...item,
+          name: item.name || item.defectTypeName,
+          defectTypeName: item.defectTypeName || item.name,
+        })),
+        totalElements: data.data.length,
+        totalPages: 1,
+        pageNumber: 0,
+        pageSize: data.data.length,
+      },
+    };
+  }
+  return data;
 };
 
-export const updateDefectType = async (id: number, data: { name: string }) => {
-  const updated = mockDb.updateDefectType(id, data.name);
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'Defect type updated successfully',
-    data: updated ? { id: updated.id, defectTypeName: updated.defectTypeName } : null,
-  };
+export const createDefectType = async (data: { name: string; description?: string }) => {
+  const response = await apiClient.post(ENDPOINTS.defectType, data);
+  return response.data;
 };
 
-export const getDefectTypes = async (_page = 0, _size = 100): Promise<GetDefectTypesResponse> => {
-  const defectTypes = mockDb.getDefectTypes();
-  const now = new Date().toISOString();
-  return {
-    status: 'success',
-    message: 'Success',
-    data: {
-      content: defectTypes.map(d => ({
-        id: d.id,
-        defectTypeName: d.defectTypeName,
-        description: d.description || d.defectTypeName,
-        category: 'functional',
-        severity: 'medium',
-        priority: 'medium',
-        isActive: true,
-        createdAt: now,
-        updatedAt: now,
-      })),
-      totalElements: defectTypes.length,
-      totalPages: 1,
-      pageNumber: 0,
-      pageSize: 100,
-    },
-  };
+export const updateDefectType = async (id: number, data: { name: string; description?: string }) => {
+  const response = await apiClient.put(ENDPOINTS.defectTypeById(id), data);
+  return response.data;
 };
 
 export const deleteDefectType = async (id: number) => {
-  mockDb.deleteDefectType(id);
-  return {
-    status: 'success',
-    statusCode: 200,
-    message: 'Defect type deleted successfully',
-  };
+  const response = await apiClient.delete(ENDPOINTS.defectTypeById(id));
+  return response.data;
 };

@@ -1,4 +1,4 @@
-import React, { useState, useCallback, useEffect } from "react";
+import React, { useState, useCallback, useEffect, useRef } from "react";
 import ReactFlow, {
   Node,
   Edge,
@@ -13,6 +13,7 @@ import ReactFlow, {
   EdgeTypes,
   Handle,
   Position,
+  ReactFlowProvider,
 } from "reactflow";
 import "reactflow/dist/style.css";
 import { Button } from "../components/ui/Button";
@@ -26,6 +27,7 @@ import {
   Save,
   Trash2,
   ChevronLeft,
+  Plus,
 } from "lucide-react";
 import { useApp } from "../context/AppContext";
 import {
@@ -106,6 +108,7 @@ const initialEdges: Edge[] = [];
 
 const StatusWorkflow: React.FC = () => {
   const { statusTypes, setStatusTypes } = useApp();
+  const reactFlowWrapper = useRef<HTMLDivElement>(null);
   const [reactFlowInstance, setReactFlowInstance] = useState<any>(null);
   const [nodes, setNodes, onNodesChange] = useNodesState([]);
   const [edges, setEdges, onEdgesChange] = useEdgesState([]);
@@ -196,13 +199,35 @@ const StatusWorkflow: React.FC = () => {
     (event: React.DragEvent) => {
       event.preventDefault();
 
-      const type = event.dataTransfer.getData("application/reactflow");
+      const type =
+        event.dataTransfer.getData("application/reactflow") ||
+        event.dataTransfer.getData("text/plain") ||
+        event.dataTransfer.getData("text");
+
       if (!type) return;
 
-      const position = reactFlowInstance.screenToFlowPosition({
-        x: event.clientX,
-        y: event.clientY,
-      });
+      let position = { x: 250, y: 150 };
+
+      if (reactFlowInstance) {
+        if (typeof reactFlowInstance.screenToFlowPosition === "function") {
+          position = reactFlowInstance.screenToFlowPosition({
+            x: event.clientX,
+            y: event.clientY,
+          });
+        } else if (
+          reactFlowWrapper.current &&
+          typeof reactFlowInstance.project === "function"
+        ) {
+          const bounds = reactFlowWrapper.current.getBoundingClientRect();
+          position = reactFlowInstance.project({
+            x: event.clientX - bounds.left,
+            y: event.clientY - bounds.top,
+          });
+        }
+      }
+
+      const status =
+        statusTypes && statusTypes.find((s) => s.name === type);
 
       const newNode: Node = {
         id: `${type}-${Date.now()}`,
@@ -210,15 +235,36 @@ const StatusWorkflow: React.FC = () => {
         position,
         data: {
           label: type,
-          color:
-            (statusTypes && statusTypes.find((s) => s.name === type)?.color) ||
-            "#94a3b8",
+          color: status?.color || "#94a3b8",
         },
       };
 
       setNodes((nds: Node[]) => nds.concat(newNode));
     },
     [reactFlowInstance, setNodes, statusTypes],
+  );
+
+  const handleAddStatusToCanvas = useCallback(
+    (statusName: string) => {
+      const status =
+        statusTypes && statusTypes.find((s) => s.name === statusName);
+      const offset = nodes.length * 35;
+      const newNode: Node = {
+        id: `${statusName}-${Date.now()}`,
+        type: "default",
+        position: {
+          x: 200 + (offset % 240),
+          y: 80 + (offset % 300),
+        },
+        data: {
+          label: statusName,
+          color: status?.color || "#94a3b8",
+        },
+      };
+
+      setNodes((nds: Node[]) => nds.concat(newNode));
+    },
+    [nodes.length, setNodes, statusTypes],
   );
 
   const onNodeClick = useCallback((event: React.MouseEvent, node: Node) => {
@@ -399,33 +445,43 @@ const StatusWorkflow: React.FC = () => {
 
   
   const convertWorkflowToApiFormat = useCallback(() => {
-    const apiNodes = nodes.map((node) => {
-      const status = statusTypes.find((s) => s.name === node.data.label);
+    const apiNodes = nodes
+      .map((node) => {
+        const status = statusTypes.find((s) => s.name === node.data.label);
 
-      return {
-        id: Number(status?.id),
-        positionX: node.position.x,
-        positionY: node.position.y,
-      };
-    });
+        return {
+          id: Number(status?.id),
+          positionX: node.position.x,
+          positionY: node.position.y,
+        };
+      })
+      .filter((n) => !isNaN(n.id) && n.id > 0);
 
-    const connections = edges.map((edge) => {
-      const sourceNode = nodes.find((node) => node.id === edge.source);
-      const targetNode = nodes.find((node) => node.id === edge.target);
+    const connections = edges
+      .map((edge) => {
+        const sourceNode = nodes.find((node) => node.id === edge.source);
+        const targetNode = nodes.find((node) => node.id === edge.target);
 
-      const sourceStatus = statusTypes.find(
-        (status) => status.name === sourceNode?.data.label,
+        const sourceStatus = statusTypes.find(
+          (status) => status.name === sourceNode?.data.label,
+        );
+
+        const targetStatus = statusTypes.find(
+          (status) => status.name === targetNode?.data.label,
+        );
+
+        return {
+          fromStatusId: Number(sourceStatus?.id),
+          toStatusId: Number(targetStatus?.id),
+        };
+      })
+      .filter(
+        (c) =>
+          !isNaN(c.fromStatusId) &&
+          !isNaN(c.toStatusId) &&
+          c.fromStatusId > 0 &&
+          c.toStatusId > 0,
       );
-
-      const targetStatus = statusTypes.find(
-        (status) => status.name === targetNode?.data.label,
-      );
-
-      return {
-        fromStatusId: Number(sourceStatus?.id),
-        toStatusId: Number(targetStatus?.id),
-      };
-    });
 
     return {
       nodes: apiNodes,
@@ -451,9 +507,13 @@ const StatusWorkflow: React.FC = () => {
       }
 
       console.log("Sending workflow data to API:", workflowData);
-      await saveWorkflow(workflowData);
-      setSaveMessage({ type: "success", text: "Workflow saved successfully!" });
+      const response = await saveWorkflow(workflowData);
+      setSaveMessage({
+        type: "success",
+        text: response.statusMessage || "Workflow saved successfully!",
+      });
 
+      await loadExistingWorkflows();
       
       setTimeout(() => setSaveMessage(null), 3000);
     } catch (error: any) {
@@ -602,16 +662,18 @@ const StatusWorkflow: React.FC = () => {
       
       const response = await getAllDefectStatuses();
 
-      
-      const apiStatusTypes = response.content.map((status) => ({
+      const list = Array.isArray(response?.content)
+        ? response.content
+        : Array.isArray(response?.data)
+        ? response.data
+        : [];
+
+      const apiStatusTypes = list.map((status: any) => ({
         id: String(status.id),
-        name: status.name,
-        color: status.color,
+        name: status.name || status.statusName,
+        color: status.color || status.colorCode || "#94a3b8",
       }));
 
-      
-      
-      
       setStatusTypes(apiStatusTypes);
 
       
@@ -638,9 +700,9 @@ const StatusWorkflow: React.FC = () => {
   }, [handleRefreshStatuses]);
 
   return (
-    <div className="h-screen flex">
-      {}
-      <div className="w-64 bg-white border-r border-gray-200 p-4 flex flex-col">
+    <div className="h-[calc(100vh-6.5rem)] flex bg-white rounded-lg shadow-sm border border-gray-200 overflow-hidden">
+      {/* Sidebar */}
+      <div className="w-72 bg-gray-50/60 border-r border-gray-200 p-4 flex flex-col h-full overflow-y-auto">
         <div className="space-y-4">
           <div className="flex items-center justify-between">
             <div>
@@ -670,14 +732,11 @@ const StatusWorkflow: React.FC = () => {
             </div>
           </div>
 
-          <div className="text-xs text-gray-600 bg-blue-50 p-2 rounded-md">
-            <p className="font-medium mb-1">How to create workflow:</p>
-            <p>1. Drag any status from the list below to the canvas</p>
-            <p>2. Add more statuses as needed</p>
-            <p>3. Connect statuses by dragging from one node to another</p>
-            <p>4. Use the auto-arrange button (↻) to organize the layout</p>
-            <p>5. Click "Save Workflow" to save your changes</p>
-            <p className="mt-2 text-blue-600"></p>
+          <div className="text-xs text-gray-600 bg-blue-50 p-2.5 rounded-md border border-blue-100">
+            <p className="font-semibold text-blue-900 mb-1">How to build workflow:</p>
+            <p>• <strong>Drag</strong> any status below to the canvas (or click <strong>+</strong> to add)</p>
+            <p>• <strong>Connect</strong> nodes by dragging between blue handles</p>
+            <p>• Click <strong>Save Workflow</strong> when done</p>
           </div>
 
           <div className="space-y-2">
@@ -689,27 +748,41 @@ const StatusWorkflow: React.FC = () => {
             ) : (
               statusTypes.map((status) => (
                 <div
-                  key={status.name}
-                  className="p-2 border border-gray-200 rounded-md cursor-move hover:bg-gray-50 transition-colors"
-                  draggable
+                  key={status.id || status.name}
+                  className="p-2.5 bg-white border border-gray-200 rounded-lg cursor-grab active:cursor-grabbing hover:border-blue-500 hover:shadow-sm transition-all select-none flex items-center justify-between group"
+                  draggable={true}
                   onDragStart={(event) => {
                     event.dataTransfer.setData(
                       "application/reactflow",
                       status.name,
                     );
+                    event.dataTransfer.setData("text/plain", status.name);
+                    event.dataTransfer.setData("text", status.name);
                     event.dataTransfer.effectAllowed = "move";
                   }}
+                  onClick={() => handleAddStatusToCanvas(status.name)}
+                  title="Drag to canvas or click to add"
                 >
-                  <div className="flex items-center">
+                  <div className="flex items-center min-w-0 mr-2">
                     <div
-                      className="w-3 h-3 rounded-full mr-2"
+                      className="w-3.5 h-3.5 rounded-full mr-2.5 flex-shrink-0 border border-gray-300"
                       style={{ backgroundColor: status.color }}
                     />
-                    <span className="text-sm font-medium">{status.name}</span>
-                    <span className="text-xs text-gray-400 ml-auto">
-                      ID: {status.id}
+                    <span className="text-sm font-medium text-gray-800 truncate">
+                      {status.name}
                     </span>
                   </div>
+                  <button
+                    type="button"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      handleAddStatusToCanvas(status.name);
+                    }}
+                    className="p-1 rounded-md text-gray-400 hover:text-blue-600 hover:bg-blue-50 transition-colors flex-shrink-0"
+                    title="Add to canvas"
+                  >
+                    <Plus className="w-4 h-4" />
+                  </button>
                 </div>
               ))
             )}
@@ -855,38 +928,43 @@ const StatusWorkflow: React.FC = () => {
         </div>
       </div>
 
-      {}
-      <div className="flex-1">
-        {isInitialized && (
-          <ReactFlow
-            nodes={nodes}
-            edges={edges}
-            onNodesChange={onNodesChange}
-            onEdgesChange={onEdgesChange}
-            onConnect={onConnect}
-            onInit={setReactFlowInstance}
-            onDrop={onDrop}
-            onDragOver={onDragOver}
-            onNodeClick={onNodeClick}
-            nodeTypes={nodeTypes}
-            edgeTypes={edgeTypes}
-            fitView
-            defaultEdgeOptions={{
-              type: "custom",
-              animated: true,
-              markerEnd: {
-                type: MarkerType.ArrowClosed,
-                width: 20,
-                height: 20,
-                color: "#94a3b8",
-              },
-            }}
-            connectionRadius={20}
-            snapToGrid={true}
-            snapGrid={[15, 15]}
-          >
-            <Background />
-            <Controls />
+      {/* ReactFlow Canvas */}
+      <div
+        ref={reactFlowWrapper}
+        className="flex-1 h-full relative"
+        onDragOver={onDragOver}
+        onDrop={onDrop}
+      >
+        <ReactFlowProvider>
+          {isInitialized && (
+            <ReactFlow
+              nodes={nodes}
+              edges={edges}
+              onNodesChange={onNodesChange}
+              onEdgesChange={onEdgesChange}
+              onConnect={onConnect}
+              onInit={setReactFlowInstance}
+              onNodeClick={onNodeClick}
+              nodeTypes={nodeTypes}
+              edgeTypes={edgeTypes}
+              fitView
+              className="w-full h-full"
+              defaultEdgeOptions={{
+                type: "custom",
+                animated: true,
+                markerEnd: {
+                  type: MarkerType.ArrowClosed,
+                  width: 20,
+                  height: 20,
+                  color: "#94a3b8",
+                },
+              }}
+              connectionRadius={20}
+              snapToGrid={true}
+              snapGrid={[15, 15]}
+            >
+              <Background />
+              <Controls />
 
             {}
             {nodes.length === 0 && !isLoadingWorkflows && (
@@ -939,6 +1017,7 @@ const StatusWorkflow: React.FC = () => {
             </Panel>
           </ReactFlow>
         )}
+        </ReactFlowProvider>
       </div>
 
       {}

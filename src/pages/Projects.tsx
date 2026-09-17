@@ -346,52 +346,58 @@ const handleAllocateManager = async () => {
   };
 
   const getAllProject = async () => {
-  try {
-    setLoading(true);
-    const response = await getAllProjects();
-    const mappedProjects: LocalProject[] = response.map((project: any) => ({
-      id: String(project.id),
-      name: project.name || "",
-      prefix: project.prefix || "",
-      projectType: project.projectType || "",
-      status: project.status as LocalProject["status"],
-      startDate: project.startDate || "",
-      endDate: project.endDate || "",
-      projectManagerName: project.projectManagerName,
-      managerId: project.projectManagerId
-        ? String(project.projectManagerId)
-        : "",
-      projectManagerDesignationId: project.projectManagerDesignationId
-        ? Number(project.projectManagerDesignationId)
-        : undefined,
-      clientName: project.clientName || "",
-      clientCountry: project.clientCountry || "",
-      clientState: project.clientState || "",
-      clientEmail: project.clientEmail || "",
-      clientPhone: project.clientPhone || "",
-      address: project.address || "",
-      description: project.description || "",
-      managerAllocation: project.managerAllocation
-        ? Number(project.managerAllocation)
-        : undefined,
-    }));
+    try {
+      setLoading(true);
+      const response = await getAllProjects();
+      const rawList = Array.isArray(response)
+        ? response
+        : Array.isArray((response as any)?.data)
+        ? (response as any).data
+        : [];
 
-    if (isAdmin) {
-      setProjects(mappedProjects);
-    } else {
-      const userProjectIds = userProjects.map((p) => p.projectId);
-      const filteredProjects = mappedProjects.filter((project) =>
-        userProjectIds.includes(Number(project.id)),
-      );
-      setProjects(filteredProjects);
+      const mappedProjects: LocalProject[] = rawList.map((project: any) => ({
+        id: String(project.id || project.projectId),
+        name: project.name || project.projectName || "",
+        prefix: project.prefix || "",
+        projectType: project.projectType || "",
+        status: (project.status || project.projectStatus || "Active") as LocalProject["status"],
+        startDate: project.startDate || "",
+        endDate: project.endDate || "",
+        projectManagerName: project.projectManagerName || "",
+        managerId: project.projectManagerId
+          ? String(project.projectManagerId)
+          : "",
+        projectManagerDesignationId: project.projectManagerDesignationId
+          ? Number(project.projectManagerDesignationId)
+          : undefined,
+        clientName: project.clientName || "",
+        clientCountry: project.clientCountry || project.country || "",
+        clientState: project.clientState || project.state || "",
+        clientEmail: project.clientEmail || project.email || "",
+        clientPhone: project.clientPhone || project.phoneNo || "",
+        address: project.address || "",
+        description: project.description || "",
+        managerAllocation: project.managerAllocation
+          ? Number(project.managerAllocation)
+          : undefined,
+      }));
+
+      if (isAdmin || userProjects.length === 0) {
+        setProjects(mappedProjects);
+      } else {
+        const userProjectIds = userProjects.map((p) => p.projectId);
+        const filteredProjects = mappedProjects.filter((project) =>
+          userProjectIds.includes(Number(project.id)),
+        );
+        setProjects(filteredProjects.length > 0 ? filteredProjects : mappedProjects);
+      }
+    } catch (error) {
+      console.error("Failed to load projects:", error);
+      setProjects([]);
+    } finally {
+      setLoading(false);
     }
-  } catch (error) {
-    console.error(error);
-    setLoading(false);
-  } finally {
-    setLoading(false);
-  }
-};
+  };
 
   useEffect(() => {
     if (!permissionLoading) {
@@ -436,10 +442,41 @@ const handleAllocateManager = async () => {
       return;
     }
 
-    if (formData.clientPhone && !/^[0-9]+$/.test(formData.clientPhone.trim())) {
+    // Email validation (e.g. example@gmail.com)
+    if (!formData.clientEmail || !formData.clientEmail.trim()) {
       setToast({
         isOpen: true,
-        message: "Phone number must contain only digits!",
+        message: "Client email is required",
+        type: "error",
+      });
+      return;
+    }
+
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.clientEmail.trim())) {
+      setToast({
+        isOpen: true,
+        message: "Please enter a valid email format (e.g., example@gmail.com)",
+        type: "error",
+      });
+      return;
+    }
+
+    // Phone number validation: 10 digits
+    if (!formData.clientPhone || !formData.clientPhone.trim()) {
+      setToast({
+        isOpen: true,
+        message: "Client phone number is required",
+        type: "error",
+      });
+      return;
+    }
+
+    const phoneRegex = /^\d{10}$/;
+    if (!phoneRegex.test(formData.clientPhone.trim())) {
+      setToast({
+        isOpen: true,
+        message: "Phone number must be exactly 10 digits",
         type: "error",
       });
       return;

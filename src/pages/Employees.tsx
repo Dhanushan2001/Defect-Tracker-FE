@@ -36,7 +36,8 @@ interface LocalEmployee {
   email: string;
   contactNo: string;
   name: string;
-   designationId: number;
+  designationId: number;
+  designationName?: string;
   joinDate: string;
   isActive:boolean;
   skills: string[];
@@ -99,22 +100,23 @@ export const Employees: React.FC = () => {
   const showToast = (message: string, type: "success" | "error" = "success") =>
     setToast({ isOpen: true, message, type });
 
-  const filteredEmployees = allEmployees.filter((emp) => {
-  const matchesSearch =
-    !searchTerm.trim() ||
-    emp.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
-    emp.email.toLocaleLowerCase().includes(searchTerm.toLowerCase())||                              
-    emp.contactNo.includes(searchTerm) ||
-    
-    `EMP${String(emp.id).padStart(4, "0")}`.toLowerCase().includes(searchTerm.toLowerCase());
+  const filteredEmployees = allEmployees
+    .filter((emp) => {
+      const matchesSearch =
+        !searchTerm.trim() ||
+        emp.firstName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        emp.lastName.toLowerCase().includes(searchTerm.toLowerCase()) ||
+        emp.email.toLocaleLowerCase().includes(searchTerm.toLowerCase()) ||
+        emp.contactNo.includes(searchTerm) ||
+        `EMP${String(emp.id).padStart(4, "0")}`.toLowerCase().includes(searchTerm.toLowerCase());
 
-  const matchesStatus = !isActiveFilter || String(emp.isActive) === isActiveFilter;
-  const matchesGender = !genderFilter || emp.gender === genderFilter;
-  const matchesDesignation = !nameFilter || emp.designationName === nameFilter;
+      const matchesStatus = !isActiveFilter || String(emp.isActive) === isActiveFilter;
+      const matchesGender = !genderFilter || emp.gender === genderFilter;
+      const matchesDesignation = !nameFilter || emp.designationName === nameFilter;
 
-  return matchesSearch && matchesStatus && matchesGender && matchesDesignation;
-});
+      return matchesSearch && matchesStatus && matchesGender && matchesDesignation;
+    })
+    .sort((a, b) => Number(a.id) - Number(b.id));
 
   const totalPages = Math.ceil(filteredEmployees.length / rowsPerPage);
 
@@ -132,55 +134,74 @@ const paginatedEmployees = filteredEmployees.slice(
 
   const handleSubmit = async(e: React.FormEvent) => {
     e.preventDefault();
-     if (savingEmployee) return;
-      setSavingEmployee(true);
-     try{
-       if (editingEmployee) {
-     const Updatepayload = {
-          firstName: formData.firstName,
-          lastName: formData.lastName,
-          email: formData.email,
-          contactNo: formData.contactNo,
+    if (savingEmployee) return;
+
+    // Step 2: Validate designation selection
+    if (!formData.designationId) {
+      showToast("Please select a designation", "error");
+      return;
+    }
+
+    // Step 3: Validate email format (e.g. name@gmail.com)
+    const emailRegex = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
+    if (!emailRegex.test(formData.email.trim())) {
+      showToast("Please enter a valid email format (e.g., example@gmail.com)", "error");
+      return;
+    }
+
+    // Step 4: Validate 10-digit WhatsApp number
+    const whatsappRegex = /^\d{10}$/;
+    if (!whatsappRegex.test(formData.contactNo.trim())) {
+      showToast("WhatsApp number must be exactly 10 digits", "error");
+      return;
+    }
+
+    setSavingEmployee(true);
+    try {
+      if (editingEmployee) {
+        const Updatepayload = {
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
+          email: formData.email.trim().toLowerCase(),
+          contactNo: formData.contactNo.trim(),
           gender: formData.gender,
           joinDate: formData.joinDate,
           designationId: Number(formData.designationId),
         };
-            const response = await updateUser( Number(editingEmployee.id), Updatepayload);
+        const response = await updateUser(Number(editingEmployee.id), Updatepayload);
         await getAllEmployees();
-        showToast(response.statusMessage);
-    
-
-
-    } else {
+        showToast(response.statusMessage || response.message || "Employee updated successfully");
+      } else {
         const apiPayLoad = {
-        firstName: formData.firstName,
-        lastName: formData.lastName,
-        gender: formData.gender,
-        email: formData.email,
-        contactNo: formData.contactNo,
-       designationId: Number(formData.designationId),
-        joinDate: formData.joinDate,
-        isActive: formData.isActive ? "active" : "inactive",
-        skills: formData.skills.split(",").map(s => s.trim()).filter(Boolean),
-        experience: formData.experience,
-        availability: formData.availability,
-        currentProjects: [],
-      };
-       const response = await createUser(apiPayLoad)
-      console.log(createUser);
-       await getAllEmployees()
-      showToast(response.statusMessage);
-
-    }
-    setEditingEmployee(null);
-    resetForm();
-    setIsModalOpen(false);
-  }catch(error: any){
-      const errorMsg =error.response?.data?.message || "Failed to create Employee";
+          firstName: formData.firstName.trim(),
+          lastName: formData.lastName.trim(),
+          gender: formData.gender,
+          email: formData.email.trim().toLowerCase(),
+          contactNo: formData.contactNo.trim(),
+          designationId: Number(formData.designationId),
+          joinDate: formData.joinDate,
+          isActive: formData.isActive ? "active" : "inactive",
+          skills: formData.skills ? formData.skills.split(",").map(s => s.trim()).filter(Boolean) : [],
+          experience: formData.experience,
+          availability: formData.availability,
+          currentProjects: [],
+        };
+        const response = await createUser(apiPayLoad);
+        await getAllEmployees();
+        showToast(response.statusMessage || response.message || "Employee created successfully");
+      }
+      setEditingEmployee(null);
+      resetForm();
+      setIsModalOpen(false);
+    } catch(error: any) {
+      const errorMsg =
+        error.response?.data?.message ||
+        error.response?.data?.statusMessage ||
+        "Failed to save Employee";
       showToast(errorMsg, "error");
-  }finally {
-    setSavingEmployee(false);
-  }
+    } finally {
+      setSavingEmployee(false);
+    }
   };
 
   const handleEdit = (employee: LocalEmployee) => {
@@ -212,6 +233,8 @@ const paginatedEmployees = filteredEmployees.slice(
         ? response.data.content
         : [];
 
+      list.sort((a: any, b: any) => Number(a.id) - Number(b.id));
+
       setAllEmployees(list);
       setEmployees(list);
     };
@@ -228,6 +251,8 @@ const paginatedEmployees = filteredEmployees.slice(
                   ? response.data.content
                   : [];
 
+                list.sort((a: any, b: any) => Number(a.id) - Number(b.id));
+
                 setAllEmployees(list);
                 setEmployees(list);
 
@@ -238,20 +263,33 @@ const paginatedEmployees = filteredEmployees.slice(
               }
         };
 
-  const getAllDesignations = async()=>{
-    const response = await getDesignations()
-    console.log('Designation :',response.data.content);
-    
-     const uniqueData = response.data.content.filter(
-    (value, index, self) =>
-      index ===
-      self.findIndex(
-        (t) => t.name === value.name
-          )
+  const getAllDesignations = async () => {
+    try {
+      const response = await getDesignations();
+      const list = Array.isArray(response.data)
+        ? response.data
+        : Array.isArray(response.data?.content)
+        ? response.data.content
+        : Array.isArray(response)
+        ? response
+        : [];
+
+      const mapped: LocalDesignation[] = list
+        .map((d: any) => ({
+          id: d.id,
+          name: d.name || d.designationName || "",
+        }))
+        .filter((d: any) => d.name);
+
+      const uniqueData = mapped.filter(
+        (value, index, self) =>
+          index === self.findIndex((t) => t.name.toLowerCase() === value.name.toLowerCase())
       );
-      console.log(uniqueData);
       setDesignations(uniqueData);
-      }
+    } catch (error) {
+      console.error("Failed to load designations:", error);
+    }
+  };
 
   useEffect(() => {
     localStorage.removeItem("selectedProjectId");
@@ -349,6 +387,9 @@ const confirmDelete = async () => {
             const stringValue = typeof value === 'string' ? value : '';
             const formatted = stringValue.charAt(0).toUpperCase() + stringValue.slice(1).toLowerCase();
             setFormData(prev => ({ ...prev, [field]: formatted }));
+        } else if (field === "contactNo") {
+            const cleanDigits = String(value).replace(/\D/g, "").slice(0, 10);
+            setFormData(prev => ({ ...prev, contactNo: cleanDigits }));
         } else {
             setFormData(prev => ({ ...prev, [field]: value }));
         }
@@ -623,9 +664,8 @@ const confirmDelete = async () => {
               </div>
           </div>
           <div className="grid grid-cols-2 gap-4">
-
-            <Input label="Email ID" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} placeholder="Enter Email ID" required />
-              <Input label="Whatsup Number" value={formData.contactNo} onChange={(e) => handleInputChange("contactNo", e.target.value)} placeholder="Enter Whatsup number" required />
+            <Input label="Email ID" type="email" value={formData.email} onChange={(e) => handleInputChange("email", e.target.value)} placeholder="e.g. name@gmail.com" required />
+            <Input label="Whatsup Number" value={formData.contactNo} onChange={(e) => handleInputChange("contactNo", e.target.value)} placeholder="10-digit number" maxLength={10} required />
           </div>
 
           <div className="grid grid-cols-2 gap-4">

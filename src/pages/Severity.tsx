@@ -83,6 +83,7 @@ const Severity: React.FC = () => {
   };
 
   const [colorError, setColorError] = useState('');
+  const [weightError, setWeightError] = useState('');
 
   const fetchSeverity = async (page:number,pageSize:number)=>{
     try{
@@ -109,18 +110,32 @@ const Severity: React.FC = () => {
   useEffect(() => {
     if (isCreateModalOpen) {
       const isValidHex = /^#[0-9A-Fa-f]{6}$/.test(formData.color);
-    if (!isValidHex) {
+      if (!isValidHex) {
+        setColorError('');
+      } else {
+        const isDuplicate = severities.some(s => s.color.toLowerCase() === formData.color.toLowerCase());
+        setColorError(isDuplicate ? 'This color is already in use. Please choose a different color.' : '');
+      }
+
+      const isWeightDuplicate = severities.some(s => Number(s.weight) === Number(formData.weight));
+      setWeightError(isWeightDuplicate ? 'This weight is already in use. Each severity must have a unique weight.' : '');
+    } else if (isEditModalOpen && editingSeverity) {
+      const isWeightDuplicate = severities.some(
+        s => Number(s.weight) === Number(formData.weight) && s.id !== editingSeverity.id
+      );
+      setWeightError(isWeightDuplicate ? 'This weight is already in use. Each severity must have a unique weight.' : '');
       setColorError('');
-      return;
-    }
-      const isDuplicate = severities.some(s => s.color.toLowerCase() === formData.color.toLowerCase());
-      setColorError(isDuplicate ? 'This color is already in use. Please choose a different color.' : '');
     } else {
       setColorError('');
+      setWeightError('');
     }
-  }, [formData.color, severities, isCreateModalOpen]);
+  }, [formData.color, formData.weight, severities, isCreateModalOpen, isEditModalOpen, editingSeverity]);
 
-  const resetForm = () => setFormData({ name: '', color: '#000000', weight: 1 });
+  const resetForm = () => {
+    setFormData({ name: '', color: '#000000', weight: 1 });
+    setColorError('');
+    setWeightError('');
+  };
 
   const handleColorInput = (e: React.ChangeEvent<HTMLInputElement>) => {
     let value = e.target.value;
@@ -174,6 +189,14 @@ const Severity: React.FC = () => {
       return;
     }
     
+    // Duplicate weight check
+    if (weightError || severities.some(s => Number(s.weight) === Number(formData.weight))) {
+      setIsCreateModalOpen(false);
+      resetForm();
+      showToast('Severity weight already exists. Please choose a unique weight.', 'error');
+      return;
+    }
+
     try {
        const normalizedColor = normalizeColor(formData.color);
       const res = await createSeverity({
@@ -202,10 +225,12 @@ const Severity: React.FC = () => {
       let errorMessage = 'Failed to create Severity';
       if (err.response?.data?.message) {
         errorMessage = err.response.data.message;
+      } else if (err.response?.data?.statusMessage) {
+        errorMessage = err.response.data.statusMessage;
       } else if (err.message) {
         errorMessage = err.message;
       } else if (err.response?.status === 400) {
-        errorMessage = 'Invalid Severity name. Please check your input.';
+        errorMessage = 'Invalid Severity input. Please check your input.';
       }
       
       showToast(errorMessage, 'error');
@@ -273,6 +298,12 @@ const Severity: React.FC = () => {
     return;
   }
 
+  // Duplicate weight check
+  if (weightError || severities.some(s => Number(s.weight) === Number(formData.weight) && s.id !== editingSeverity.id)) {
+    showToast('Severity weight already exists. Please choose a unique weight.', 'error');
+    return;
+  }
+
   // Name validation
   if (
     formData.name &&
@@ -330,6 +361,9 @@ const Severity: React.FC = () => {
     if (err.response?.data?.message) {
       errorMessage =
         err.response.data.message;
+    } else if (err.response?.data?.statusMessage) {
+      errorMessage =
+        err.response.data.statusMessage;
     } else if (err.message) {
       errorMessage = err.message;
     }
@@ -466,11 +500,19 @@ const Severity: React.FC = () => {
           </div>
           <div className="w-full">
             <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
-            <Input type="number" value={formData.weight} min={1} onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })} placeholder="Enter severity weight" />
+            <Input
+              type="number"
+              value={formData.weight}
+              min={1}
+              onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })}
+              placeholder="Enter severity weight"
+              className={weightError ? 'border-red-500' : ''}
+            />
+            {weightError && <div className="text-red-600 text-sm w-full mt-1">{weightError}</div>}
           </div>
           <div className="flex justify-end space-x-3 pt-4 w-full">
             <Button variant="secondary" onClick={() => { setIsCreateModalOpen(false); resetForm(); setShowColorPickerCreate(false); }}>Cancel</Button>
-            <Button onClick={handleCreate} disabled={!formData.name || !!colorError}>Create</Button>
+            <Button onClick={handleCreate} disabled={!formData.name || !!colorError || !!weightError}>Create</Button>
           </div>
         </div>
       </Modal>
@@ -487,10 +529,21 @@ const Severity: React.FC = () => {
               {showColorPickerEdit && (<div className="z-50 mt-2"><HexColorPicker color={formData.color} onChange={color => setFormData({ ...formData, color })} /></div>)}
             </div>
           </div>
-          <div><label className="block text-sm font-medium text-gray-700 mb-1">Weight</label><Input type="number" value={formData.weight} min={1} onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })} placeholder="Enter severity weight" /></div>
+          <div>
+            <label className="block text-sm font-medium text-gray-700 mb-1">Weight</label>
+            <Input
+              type="number"
+              value={formData.weight}
+              min={1}
+              onChange={e => setFormData({ ...formData, weight: Number(e.target.value) })}
+              placeholder="Enter severity weight"
+              className={weightError ? 'border-red-500' : ''}
+            />
+            {weightError && <div className="text-red-600 text-sm w-full mt-1">{weightError}</div>}
+          </div>
           <div className="flex justify-end space-x-3 pt-4">
             <Button variant="secondary" onClick={() => { setIsEditModalOpen(false); setEditingSeverity(null); resetForm(); setShowColorPickerEdit(false); }}>Cancel</Button>
-            <Button onClick={handleEdit} disabled={!formData.name}>Update</Button>
+            <Button onClick={handleEdit} disabled={!formData.name || !!weightError}>Update</Button>
           </div>
         </div>
       </Modal>
