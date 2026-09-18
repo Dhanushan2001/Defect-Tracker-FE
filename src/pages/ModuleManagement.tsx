@@ -54,6 +54,7 @@ import {
   type SubModuleDevAllocation,
 } from "../api/subModuleDevAlloc";
 import { allocateModuleLeader } from "../api/module/allocateModuleLeader";
+import { getProjectAllocationsById } from "../api/bench/projectAllocation";
 import { useAccessibleProjects } from "../api/useAccessibleProjects";
 import { usePermission } from "../context/PermissionContext";
 
@@ -133,6 +134,7 @@ export const ModuleManagement: React.FC = () => {
     projectAllocationId: number;
     userId: number;
     roleId?: number;
+    roleName?: string;
   }>>([]);
 
   const [developerRoleNames, setDeveloperRoleNames] = useState<string[]>([]);
@@ -153,29 +155,58 @@ export const ModuleManagement: React.FC = () => {
     return normalizeRoleName(parts.slice(1).join("-"));
   };
 
-  const getRoleTypedDevelopers = () => {
-    const allowedRoleIds = new Set(developerRoleIds);
+  const isQaLeadOrQaEngineerRole = (roleName?: string, roleId?: number): boolean => {
+    if (roleId && moduleLeaderRoleIds.includes(roleId)) return true;
+    const normalized = normalizeRoleName(roleName);
+    if (
+      normalized === "QA" ||
+      normalized.startsWith("QA") ||
+      normalized.includes("QA")
+    ) {
+      return true;
+    }
+    const allowedRoleNames = new Set(moduleLeaderRoleNames.map(normalizeRoleName));
+    return allowedRoleNames.has(normalized);
+  };
+
+  const isSubmoduleDeveloperRole = (roleName?: string, roleId?: number): boolean => {
+    if (roleId && developerRoleIds.includes(roleId)) return true;
+    const normalized = normalizeRoleName(roleName);
+
+    // Strictly exclude QA roles and Project Managers
+    if (
+      normalized.includes("QA") ||
+      normalized.includes("MANAGER")
+    ) {
+      return false;
+    }
+
+    if (
+      normalized === "DEV" ||
+      normalized.startsWith("DEV") ||
+      normalized.includes("DEV") ||
+      normalized.includes("DEVELOPER") ||
+      normalized.includes("SENIOR_DEVELOPER") ||
+      normalized.includes("JUNIOR_DEVELOPER")
+    ) {
+      return true;
+    }
+
     const allowedRoleNames = new Set(developerRoleNames.map(normalizeRoleName));
+    return allowedRoleNames.has(normalized);
+  };
 
+  const getRoleTypedDevelopers = () => {
     return developersWithRoles.filter((dev) => {
-      if (dev.roleId && allowedRoleIds.has(dev.roleId)) {
-        return true;
-      }
-
-      return allowedRoleNames.has(getRoleFromUserWithRole(dev.userWithRole));
+      const devRoleName = dev.roleName || getRoleFromUserWithRole(dev.userWithRole);
+      return isSubmoduleDeveloperRole(devRoleName, dev.roleId);
     });
   };
 
   const getRoleTypedModuleLeaders = () => {
-    const allowedRoleIds = new Set(moduleLeaderRoleIds);
-    const allowedRoleNames = new Set(moduleLeaderRoleNames.map(normalizeRoleName));
-
     return developersWithRoles.filter((dev) => {
-      if (dev.roleId && allowedRoleIds.has(dev.roleId)) {
-        return true;
-      }
-
-      return allowedRoleNames.has(getRoleFromUserWithRole(dev.userWithRole));
+      const devRoleName = dev.roleName || getRoleFromUserWithRole(dev.userWithRole);
+      return isQaLeadOrQaEngineerRole(devRoleName, dev.roleId);
     });
   };
 
@@ -262,17 +293,54 @@ export const ModuleManagement: React.FC = () => {
     if (!selectedProjectId) return;
     setHasLoadedProjectAllocatedEmployees(false);
     try {
-      const users = mockDb.getUsers();
-      const mapped = users.map((emp: any) => {
-        const employeeId = emp.id;
+      const res = await getProjectAllocationsById(selectedProjectId);
+      const allocations = res?.data || [];
 
-        return {
-          userWithRole: `${emp.firstName} ${emp.lastName}-${emp.roleName || 'Developer'}`,
-          projectAllocationId: emp.id,
-          userId: employeeId,
-          roleId: emp.roleId || 1,
-        };
-      });
+      let mapped: Array<{
+        userWithRole: string;
+        projectAllocationId: number;
+        userId: number;
+        roleId?: number;
+        roleName?: string;
+      }> = [];
+
+      if (Array.isArray(allocations) && allocations.length > 0) {
+        mapped = allocations.map((item: any) => {
+          const employeeId = item.employeeId || item.userId;
+          const fullName =
+            item.userFullName ||
+            item.employeeName ||
+            `${item.firstName || ""} ${item.lastName || ""}`.trim() ||
+            `Employee ${employeeId}`;
+          const rName =
+            item.roleName ||
+            item.designationName ||
+            "Developer";
+
+          return {
+            userWithRole: `${fullName}-${rName}`,
+            projectAllocationId: item.id || employeeId,
+            userId: employeeId,
+            roleId: item.roleId,
+            roleName: rName,
+          };
+        });
+      } else {
+        const allEmps = Array.isArray(employees) && employees.length > 0 ? employees : mockDb.getUsers();
+        mapped = allEmps.map((emp: any) => {
+          const empId = Number(emp.userId || emp.id) || 1;
+          const rName = emp.roleName || emp.designationName || emp.designation || "Developer";
+          const fullName = emp.name || `${emp.firstName || ""} ${emp.lastName || ""}`.trim() || `Employee ${empId}`;
+          return {
+            userWithRole: `${fullName}-${rName}`,
+            projectAllocationId: empId,
+            userId: empId,
+            roleId: emp.roleId || emp.designationId || 1,
+            roleName: rName,
+          };
+        });
+      }
+
       setDevelopersWithRoles(mapped);
       setProjectAllocatedEmployeeIds(
         new Set(mapped.map((dev: any) => String(dev.userId)))
@@ -1627,6 +1695,8 @@ export const ModuleManagement: React.FC = () => {
         if (didAllocate) {
           setToastMessage("Module leader allocated successfully!");
           setShowToast(true);
+          await fetchModules();
+          await fetchDevelopersWithRoles();
           
           if (selectedItems.length > 0) {
             const moduleItems = selectedItems.filter(
@@ -1836,7 +1906,13 @@ export const ModuleManagement: React.FC = () => {
 
     return selectedItems.some((item) => {
       if (item.type === "module") {
-        
+        const mod = (modulesByProjectId || []).find(
+          (m) => String(m.id) === String(item.moduleId)
+        );
+        if (mod && (mod as any).assignedDev) {
+          return true;
+        }
+
         const directModuleDevs = (moduleDevelopers[item.moduleId] || []).filter(
           (d) => d.subModuleId == null,
         );
@@ -3705,12 +3781,9 @@ export const ModuleManagement: React.FC = () => {
                               <div className="text-sm font-semibold text-gray-900">
                                 {name.trim()}
                               </div>
-                              {role &&
-                                role.trim().toLowerCase() !== "developer" && (
-                                  <div className="text-xs text-gray-500">
-                                    {role.trim()}
-                                  </div>
-                                )}
+                              <div className="text-xs text-blue-600 font-medium">
+                                {role ? role.trim() : "QA"}
+                              </div>
                             </div>
                           </div>
                         );
@@ -3876,12 +3949,9 @@ export const ModuleManagement: React.FC = () => {
                               <div className="text-sm font-semibold text-gray-900">
                                 {name.trim()}
                               </div>
-                              {role &&
-                                role.trim().toLowerCase() !== "developer" && (
-                                  <div className="text-xs text-gray-500">
-                                    {role.trim()}
-                                  </div>
-                                )}
+                              <div className="text-xs text-blue-600 font-medium">
+                                {role ? role.trim() : "Developer"}
+                              </div>
                             </div>
                           </div>
                         );

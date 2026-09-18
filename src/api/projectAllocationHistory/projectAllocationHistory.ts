@@ -1,4 +1,5 @@
-import { mockDb } from "../../mock/mockData";
+import apiClient from "../../lib/api";
+import { ENDPOINTS } from "../../utils/apiendpoint";
 
 export interface getProjectAllocationHistoryResponse {
   status: string;
@@ -8,19 +9,18 @@ export interface getProjectAllocationHistoryResponse {
 }
 
 export const getProjectAllocationHistory = async (id: number): Promise<any> => {
-  const users = mockDb.getUsers();
-  return users.map(u => ({
-    id: u.id,
-    employeeId: u.id,
-    employeeName: `${u.firstName} ${u.lastName}`,
-    roleName: u.roleName || 'Developer',
-    designationName: u.designationName || 'Software Engineer',
-    allocationPercent: 50,
-    startDate: '2025-01-01',
-    endDate: '2026-12-31',
-    status: 'ACTIVE',
-    projectId: id,
-  }));
+  try {
+    const response = await apiClient.get(ENDPOINTS.projectAllocationProjectEmployeeHistory(id));
+    return response.data;
+  } catch (error) {
+    console.error("Error fetching project allocation history:", error);
+    return {
+      status: "error",
+      statusCode: 500,
+      message: "Failed to fetch allocation history",
+      data: [],
+    };
+  }
 };
 
 export const getProjectAllocationHistoryByRole = async (projectId: number, _roleId?: string): Promise<any> => {

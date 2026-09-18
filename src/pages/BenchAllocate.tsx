@@ -372,16 +372,27 @@ export default function BenchAllocate() {
     toDate: string,
   ) {
     if (!fromDate && !toDate) return true;
-    if (!availabilityPeriod) return false;
+    if (!availabilityPeriod) return true;
 
-    const availableDate = new Date(availabilityPeriod);
-    if (isNaN(availableDate.getTime())) return false;
+    const from = fromDate ? new Date(fromDate).getTime() : null;
+    const to = toDate ? new Date(toDate).getTime() : null;
 
-    const from = fromDate ? new Date(fromDate) : null;
-    const to = toDate ? new Date(toDate) : null;
+    if (availabilityPeriod.includes(" to ")) {
+      const [startStr, endStr] = availabilityPeriod.split(" to ");
+      const startDate = startStr ? new Date(startStr.trim()).getTime() : null;
+      const endDate = endStr ? new Date(endStr.trim()).getTime() : null;
 
-    if (from && availableDate < from) return false;
-    if (to && availableDate > to) return false;
+      if (from && endDate && !isNaN(endDate) && endDate < from) return false;
+      if (to && startDate && !isNaN(startDate) && startDate > to) return false;
+      return true;
+    }
+
+    const availableDate = new Date(availabilityPeriod).getTime();
+    if (!isNaN(availableDate)) {
+      if (from && availableDate < from) return false;
+      if (to && availableDate > to) return false;
+      return true;
+    }
 
     return true;
   }
@@ -448,15 +459,15 @@ export default function BenchAllocate() {
 
         setProjectsError(null);
 
-        
-
         if (!selectedProjectId && projectsArray.length > 0) {
           const firstActiveProject = projectsArray.find(
-            (p: Project) => p.status === "active",
+            (p: any) => !p.status || p.status.toLowerCase() === "active",
           );
 
           if (firstActiveProject) {
             setSelectedProjectId(firstActiveProject.id);
+          } else {
+            setSelectedProjectId(projectsArray[0].id);
           }
         }
       })
@@ -499,33 +510,34 @@ export default function BenchAllocate() {
       
       const response = await getBenchAvailability(0, 1000, filters);
 
-      
       let benchData = [];
-      if (response.data?.data && Array.isArray(response.data.data)) {
-        benchData = response.data.data;
-      } else if (response.data && Array.isArray(response.data)) {
-        benchData = response.data;
-      } else if (
-        response.data?.content &&
-        Array.isArray(response.data.content)
-      ) {
+      const resData = response?.data !== undefined ? response.data : response;
+      if (Array.isArray(resData)) {
+        benchData = resData;
+      } else if (Array.isArray(resData?.content)) {
+        benchData = resData.content;
+      } else if (Array.isArray(resData?.data)) {
+        benchData = resData.data;
+      } else if (Array.isArray(response?.data?.content)) {
         benchData = response.data.content;
       }
 
       const mappedEmployees = benchData
         .filter(
           (item: any) =>
-            item.employee?.active === true && item.employee?.designationName,
+            (item.employee?.active ?? item.active ?? item.isActive ?? true) &&
+            (item.employee?.designationName || item.designation || item.designationName) &&
+            ((item.availability !== undefined ? item.availability : (item.employee?.availability ?? 100)) > 0),
         )
         .map((item: any) => ({
-          id: String(item.employee?.id || item.id),
+          id: String(item.employee?.id || item.id || item.employeeId),
           firstName: item.employee?.firstName || item.firstName || "",
           lastName: item.employee?.lastName || item.lastName || "",
           email: item.employee?.email || item.email || "",
-          phone: item.employee?.contactNo || item.contactNo || "",
-          designation: item.employee?.designationName || item.designation || "",
-          availability: item.availability || 0,
-          availabilityPeriod: item.availabilityPeriod || "",
+          phone: item.employee?.contactNo || item.contactNo || item.phone || "",
+          designation: item.employee?.designationName || item.designation || item.designationName || "",
+          availability: item.availability !== undefined ? item.availability : (item.employee?.availability ?? 100),
+          availabilityPeriod: item.availabilityPeriod || item.employee?.availabilityPeriod || "",
           status: "active",
         }));
 
@@ -637,29 +649,23 @@ export default function BenchAllocate() {
         const response = await getAllRoles();
         console.log("Roles API response:", response);
 
-        // Extract roles from response.data.data.content
         let rolesArray = [];
+        const resData = response?.data !== undefined ? response.data : response;
 
-        if (
-          response?.data?.data?.content &&
-          Array.isArray(response.data.data.content)
-        ) {
-          rolesArray = response.data.data.content;
-        } else if (
-          response?.data?.content &&
-          Array.isArray(response.data.content)
-        ) {
-          rolesArray = response.data.content;
-        } else if (response?.content && Array.isArray(response.content)) {
+        if (Array.isArray(resData)) {
+          rolesArray = resData;
+        } else if (Array.isArray(resData?.content)) {
+          rolesArray = resData.content;
+        } else if (Array.isArray(resData?.data)) {
+          rolesArray = resData.data;
+        } else if (Array.isArray(response?.content)) {
           rolesArray = response.content;
-        } else if (Array.isArray(response)) {
-          rolesArray = response;
         }
 
         // Map to expected format: { id, roleName }
         const formattedRoles = rolesArray.map((role: any) => ({
           id: role.id,
-          roleName: role.name, // Backend uses 'name', component expects 'roleName'
+          roleName: role.name || role.roleName || "",
         }));
 
         console.log("Formatted roles:", formattedRoles);
@@ -684,9 +690,14 @@ export default function BenchAllocate() {
       .then((response: any) => {
         console.log("Designation API Response:", response);
 
-        const designationsArray = Array.isArray(response.data?.content)
-          ? response.data.content
-          : [];
+        const resData = response?.data !== undefined ? response.data : response;
+        const designationsArray = Array.isArray(resData)
+          ? resData
+          : Array.isArray(resData?.content)
+            ? resData.content
+            : Array.isArray(resData?.data)
+              ? resData.data
+              : [];
 
         setDesignations(designationsArray);
 
@@ -986,7 +997,10 @@ export default function BenchAllocate() {
   // Only show active projects
 
   const availableProjects = useMemo(
-    () => projects.filter((p) => p.status === "active"),
+    () =>
+      projects.filter(
+        (p) => !p.status || p.status.toLowerCase() === "active",
+      ),
     [projects],
   );
 
@@ -1002,57 +1016,9 @@ export default function BenchAllocate() {
     return project;
   }, [selectedProjectId, projects]);
 
-  
-
   const benchEmployees = useMemo(() => {
-    
-
-    const hasActiveFilters =
-      designationFilter.length > 0 ||
-      availabilityFilter.length > 0 ||
-      fromDateFilter ||
-      toDateFilter;
-
-    if (hasActiveFilters) {
-      
-
-      return employees;
-    }
-
-    
-
-    const allocations = selectedProjectId
-      ? projectAllocations[selectedProjectId] || []
-      : [];
-
-    
-
-    return employees
-      .map((e) => {
-        const allocated = allocations
-
-          .filter((emp: any) => emp.userId === e.id)
-
-          .reduce(
-            (sum: number, emp: any) =>
-              sum + (emp.allocationAvailability || emp.availability),
-            0,
-          );
-
-        const remaining = e.availability - allocated;
-
-        return remaining > 0 ? { ...e, availability: remaining } : null;
-      })
-      .filter((e): e is Employee & { availability: number } => e !== null);
-  }, [
-    employees,
-    projectAllocations,
-    selectedProjectId,
-    designationFilter,
-    availabilityFilter,
-    fromDateFilter,
-    toDateFilter,
-  ]);
+    return employees.filter((e) => (e.availability ?? 0) > 0);
+  }, [employees]);
 
   
 
@@ -1101,9 +1067,7 @@ export default function BenchAllocate() {
 const allocatedEmployees = useMemo(
   () =>
     selectedProjectId
-      ? (projectAllocations[selectedProjectId] || []).filter(
-          (emp: any) => emp.roleId !== 2
-        )
+      ? (projectAllocations[selectedProjectId] || [])
       : [],
   [projectAllocations, selectedProjectId],
 );
@@ -1228,13 +1192,33 @@ const allocatedEmployees = useMemo(
       return;
     }
 
-    setAllocationModal({ open: true, employees: toAllocate });
+    setAllocationModal({
+      open: true,
+      employees: toAllocate.map((e) => ({
+        ...e,
+        allocationAvailability: e.availability,
+        roleId: roles.length > 0 ? roles[0].id : "",
+        allocationStartDate: new Date().toISOString().split("T")[0],
+      })),
+    });
   };
 
   const handleConfirmAllocation = async (updatedEmployees: any[]) => {
     if (!selectedProjectId) {
       showToast("Please select a project first", "error");
       return;
+    }
+
+    for (const emp of updatedEmployees) {
+      if (!emp.roleId) {
+        showToast(`Please select a role for ${emp.firstName} ${emp.lastName}`, "error");
+        return;
+      }
+      const allocPercent = Number(emp.allocationAvailability ?? emp.availability);
+      if (allocPercent <= 0) {
+        showToast(`Allocation percentage must be greater than 0 for ${emp.firstName}`, "error");
+        return;
+      }
     }
 
     setIsAllocating(true);
@@ -1249,13 +1233,12 @@ const allocatedEmployees = useMemo(
           allocationPercent: Number(
             emp.allocationAvailability ?? emp.availability,
           ),
-          startDate: emp.allocationStartDate,
-          endDate: emp.allocationEndDate,
+          startDate: emp.allocationStartDate || new Date().toISOString().split("T")[0],
+          endDate: emp.allocationEndDate || null,
         };
 
         try {
           if (emp.allocationId) {
-            
             await updateProjectAllocation(
               emp.allocationId, {
               endDate: emp.allocationEndDate,
@@ -1265,7 +1248,6 @@ const allocatedEmployees = useMemo(
               ),
             });
           } else {
-            
             await postProjectAllocations(payload);
           }
         } catch (error: any) {
@@ -1280,11 +1262,8 @@ const allocatedEmployees = useMemo(
       } else {
         setAllocationSuccessModal(true);
 
-        
-        await fetchBenchEmployees({}, 0, benchPageSize);
-
-        
         await refreshProjectAllocations();
+        await fetchBenchEmployees({}, 0, benchPageSize);
 
         setSelectedBench([]);
         setAllocationModal({ open: false, employees: [] });
@@ -1369,13 +1348,6 @@ const allocatedEmployees = useMemo(
         await deleteProjectAllocation(allocationId);
       }
 
-      // Refresh data
-      const allocationsData =
-        await getProjectAllocationsById(selectedProjectId);
-      setProjectAllocations((prev) => ({
-        ...prev,
-        [selectedProjectId]: allocationsData.data || [],
-      }));
       await refreshProjectAllocations();
       await fetchBenchEmployees({}, 0, benchPageSize);
       setSelectedProjectUsers([]);
@@ -1850,8 +1822,15 @@ const allocatedEmployees = useMemo(
                       onClick={() => {
                         setDesignationsLoading(true);
                         getDesignations()
-                          .then((response: DesignationGetResponse) => {
-                            const designationsArray = response.data || [];
+                          .then((response: any) => {
+                            const resData = response?.data !== undefined ? response.data : response;
+                            const designationsArray = Array.isArray(resData)
+                              ? resData
+                              : Array.isArray(resData?.content)
+                                ? resData.content
+                                : Array.isArray(resData?.data)
+                                  ? resData.data
+                                  : [];
                             setDesignations(designationsArray);
                             console.log(
                               "Designations loaded:",
@@ -2676,8 +2655,7 @@ const allocatedEmployees = useMemo(
                   >
                     <option value="">Select Role</option>
 
-                    {roles
-                    .filter((role) => role.id !== 1 && role.id !== 2).map((role) => (
+                    {roles.map((role) => (
                       <option key={role.id} value={role.id}>
                         {role.roleName}
                       </option>
@@ -2881,10 +2859,13 @@ const allocatedEmployees = useMemo(
                     <input
                       type="number"
                       min="1"
-                      max="100"
+                      max={emp.availability || 100}
                       value={emp.allocationAvailability ?? emp.availability}
                       onChange={(e) => {
-                        const value = parseInt(e.target.value) || 0;
+                        const maxVal = emp.availability || 100;
+                        let value = parseInt(e.target.value) || 0;
+                        if (value > maxVal) value = maxVal;
+                        if (value < 0) value = 0;
 
                         setAllocationModal((modal) => ({
                           ...modal,

@@ -17,6 +17,12 @@ import { mockDb } from "../../mock/mockData";
 import { Button } from "../ui/Button";
 import { Card, CardContent } from "../ui/Card";
 import { Toast } from "../ui/Toast";
+import apiClient from "../../lib/api";
+import { getReleasesByProjectId } from "../../api/releaseView/getReleasesByProject";
+import { getModulesByProjectId } from "../../api/module/getModule";
+import { getSubmodulesByModuleId } from "../../api/submodule/submoduleget";
+import { getQAMembersByProjectId } from "../../api/qa_allocation/qa_allocation";
+import { bulkAssignOwner } from "../../api/qa_allocation/qa_allocation_get_filter";
 
 interface ApiResponse<T> {
   data?: T;
@@ -278,22 +284,56 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
       setMessage(null);
 
       try {
-        const releaseData = mockDb.getReleases(Number(projectIdValue)).map((release) => ({
-          ...release,
-          releaseName: release.name || release.releaseName,
-        }));
+        let releaseData: ReleaseOption[] = [];
+        try {
+          const apiReleases = await getReleasesByProjectId(projectIdValue);
+          if (Array.isArray(apiReleases) && apiReleases.length > 0) {
+            releaseData = apiReleases.map((release: any) => ({
+              ...release,
+              releaseName: release.name || release.releaseName || `Release ${release.id}`,
+            }));
+          }
+        } catch (e) {
+          console.warn("Failed to fetch releases from API, falling back:", e);
+        }
+
+        if (releaseData.length === 0) {
+          releaseData = mockDb.getReleases(Number(projectIdValue)).map((release) => ({
+            ...release,
+            releaseName: release.name || release.releaseName,
+          }));
+        }
         setReleases(releaseData);
 
-        const moduleData = mockDb.getModules(Number(projectIdValue));
-        const modulesWithSubmodules = moduleData.map((module) => ({
-          id: module.id,
-          name: module.name || module.moduleName || `Module ${module.id}`,
-          submodules: (module.submodules || []).map((s: any) => ({
-            id: s.id,
-            name: s.name || s.subModuleName || `Submodule ${s.id}`,
-          })),
-        }));
+        let modulesWithSubmodules: ModuleOption[] = [];
+        try {
+          const apiModulesRes = await getModulesByProjectId(Number(projectIdValue));
+          const apiModules = apiModulesRes?.data || [];
+          if (Array.isArray(apiModules) && apiModules.length > 0) {
+            modulesWithSubmodules = apiModules.map((module: any) => ({
+              id: module.id,
+              name: module.name || module.moduleName || `Module ${module.id}`,
+              submodules: (module.submodules || []).map((s: any) => ({
+                id: s.id,
+                name: s.name || s.subModuleName || `Submodule ${s.id}`,
+              })),
+            }));
+          }
+        } catch (e) {
+          console.warn("Failed to fetch modules from API, falling back:", e);
+        }
 
+        if (modulesWithSubmodules.length === 0) {
+          const moduleData = mockDb.getModules(Number(projectIdValue));
+          modulesWithSubmodules = moduleData.map((module) => ({
+            id: module.id,
+            name: module.name || module.moduleName || `Module ${module.id}`,
+            submodules: (module.submodules || []).map((s: any) => ({
+              id: s.id,
+              name: s.name || s.subModuleName || `Submodule ${s.id}`,
+            })),
+          }));
+        }
         setModules(modulesWithSubmodules);
       } catch (error) {
         setMessage({
@@ -320,18 +360,37 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
       setQaLoading(true);
 
       try {
-        const qaRoleNames = await roleTypesBasedRoleFetch(["QA_ENGINEER","QA_LEAD"]);
-        const allowedRoles = new Set(qaRoleNames.map(normalizeRoleName));
+        let members: EmployeeOption[] = [];
+        try {
+          const qaRes = await getQAMembersByProjectId(Number(projectIdValue));
+          const qaList = qaRes?.data || [];
+          if (Array.isArray(qaList) && qaList.length > 0) {
+            members = qaList.map((u: any) => ({
+              id: u.userId || u.id,
+              name: u.userFullName || u.name || `Employee ${u.userId || u.id}`,
+              roleName: u.roleName || "QA Engineer",
+            }));
+          }
+        } catch (e) {
+          console.warn("Failed to fetch QA members from API, falling back:", e);
+        }
 
-        const allUsers = mockDb.getUsers();
-        const employees = allUsers.map((u) => ({
-          id: u.id,
-          name: `${u.firstName} ${u.lastName}`,
-          roleName: u.roleName || "Developer",
-        }));
+        if (members.length === 0) {
+          const qaRoleNames = await roleTypesBasedRoleFetch(["QA_ENGINEER","QA_LEAD"]);
+          const allowedRoles = new Set(qaRoleNames.map(normalizeRoleName));
 
-        setAllocatedEmployees(employees);
-        setQaMembers(employees.filter((employee) => allowedRoles.has(employee.roleName) || employee.roleName.includes("QA")));
+          const allUsers = mockDb.getUsers();
+          const employees = allUsers.map((u) => ({
+            id: u.id,
+            name: `${u.firstName} ${u.lastName}`,
+            roleName: u.roleName || "Developer",
+          }));
+
+          members = employees.filter((employee) => allowedRoles.has(employee.roleName) || employee.roleName.includes("QA"));
+        }
+
+        setAllocatedEmployees(members);
+        setQaMembers(members);
       } catch (error) {
         setAllocatedEmployees([]);
         setQaMembers([]);
@@ -351,6 +410,7 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
   const loadReleaseAllocation = useCallback(async () => {
     if (!projectIdValue || !selectedReleaseId) {
       setAllTestCases([]);
+      setTestCaseLoading(false);
       return;
     }
 
@@ -358,17 +418,44 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
     setMessage(null);
 
     try {
-      const testCases = mockDb.getTestCases();
-      setAllTestCases(
-        testCases.map((tc) => ({
-          testcaseId: tc.id,
-          testCaseNo: tc.testcaseNo,
-          name: tc.description,
-          moduleId: tc.moduleId || 1,
-          submoduleId: tc.subModuleId || 1,
-          assignedTo: tc.assignedQaId || (tc.id % 2 === 0 ? 2 : null),
-        }))
-      );
+      let loadedTestCases: ReleaseQaTestCase[] | null = null;
+      try {
+        const res = await apiClient.get(`/api/v1/release/${selectedReleaseId}/test-case`);
+        const items = res.data?.data || res.data;
+        if (Array.isArray(items)) {
+          loadedTestCases = items.map((tc: any) => ({
+            testcaseId: Number(tc.testcaseId || tc.id),
+            testCaseNo: tc.testCaseNo || tc.testCaseId || `TC-${tc.id}`,
+            name: tc.name || tc.description || "No description",
+            moduleId: Number(tc.moduleId || 0),
+            submoduleId: Number(tc.subModuleId || tc.submoduleId || 0),
+            assignedTo:
+              tc.assignedTo != null
+                ? Number(tc.assignedTo)
+                : tc.assignedQaId != null
+                ? Number(tc.assignedQaId)
+                : null,
+          }));
+        }
+      } catch (apiError) {
+        console.warn("Failed to fetch release test cases from API, falling back to mock:", apiError);
+      }
+
+      if (loadedTestCases !== null) {
+        setAllTestCases(loadedTestCases);
+      } else {
+        const testCases = mockDb.getTestCases();
+        setAllTestCases(
+          testCases.map((tc) => ({
+            testcaseId: tc.id,
+            testCaseNo: tc.testcaseNo,
+            name: tc.description,
+            moduleId: tc.moduleId || 1,
+            submoduleId: tc.subModuleId || 1,
+            assignedTo: tc.assignedQaId || (tc.id % 2 === 0 ? 2 : null),
+          }))
+        );
+      }
     } catch (error) {
       setAllTestCases([]);
       setMessage({
@@ -390,25 +477,43 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
     return map;
   }, [allocatedEmployees]);
 
-  // Modules that actually have allocated test cases.
-  const availableModules = useMemo(() => {
-    const moduleIds = new Set(allTestCases.map((testCase) => testCase.moduleId));
-    return modules.filter((module) => moduleIds.has(Number(module.id)));
-  }, [modules, allTestCases]);
+  // Modules for the project: show all available modules for selection
+  const availableModules = modules;
 
-  // Submodules with allocated test cases for the selected module.
+  // Submodules for the selected module
   const availableSubmodules = useMemo(() => {
     const selectedModule = modules.find((module) => String(module.id) === selectedModuleId);
     if (!selectedModule) return [];
+    return selectedModule.submodules || [];
+  }, [modules, selectedModuleId]);
 
-    const submoduleIds = new Set(
-      allTestCases
-        .filter((testCase) => testCase.moduleId === Number(selectedModuleId))
-        .map((testCase) => testCase.submoduleId),
-    );
-
-    return selectedModule.submodules.filter((submodule) => submoduleIds.has(Number(submodule.id)));
-  }, [modules, allTestCases, selectedModuleId]);
+  // Load submodules on demand if selected module has empty submodules
+  useEffect(() => {
+    if (!selectedModuleId) return;
+    const selectedMod = modules.find((m) => String(m.id) === selectedModuleId);
+    if (selectedMod && (!selectedMod.submodules || selectedMod.submodules.length === 0)) {
+      getSubmodulesByModuleId(Number(selectedModuleId))
+        .then((res) => {
+          const subList = res?.data || [];
+          if (Array.isArray(subList) && subList.length > 0) {
+            setModules((prev) =>
+              prev.map((m) =>
+                String(m.id) === selectedModuleId
+                  ? {
+                      ...m,
+                      submodules: subList.map((s: any) => ({
+                        id: s.id,
+                        name: s.name || s.subModuleName || `Submodule ${s.id}`,
+                      })),
+                    }
+                  : m
+              )
+            );
+          }
+        })
+        .catch((e) => console.warn("Could not fetch submodules for module:", e));
+    }
+  }, [selectedModuleId, modules]);
 
   // Employees that currently have test cases assigned (source for "From").
   const fromEmployees = useMemo(() => {
@@ -441,10 +546,10 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
     }
 
     if (selectedModuleId) {
-      base = base.filter((testCase) => testCase.moduleId === Number(selectedModuleId));
+      base = base.filter((testCase) => Number(testCase.moduleId) === Number(selectedModuleId));
     }
     if (selectedSubmoduleId) {
-      base = base.filter((testCase) => testCase.submoduleId === Number(selectedSubmoduleId));
+      base = base.filter((testCase) => Number(testCase.submoduleId) === Number(selectedSubmoduleId));
     }
 
     const search = searchTerm.trim().toLowerCase();
@@ -480,9 +585,9 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
     setCurrentPage(1);
   }, [mode, manualReassign, selectedModuleId, selectedSubmoduleId, fromEmployeeId, searchTerm, pageSize]);
 
-  const canSelectTestCases = isManualMode
-    ? Boolean(fromEmployeeId && toEmployeeId)
-    : Boolean(selectedQaId);
+  const canSaveAllocation = isManualMode
+    ? Boolean(fromEmployeeId && toEmployeeId && selectedTestCaseIds.length > 0)
+    : Boolean(selectedQaId && selectedTestCaseIds.length > 0);
 
   // In manual reassign mode, default to selecting all of the source employee's test cases.
   useEffect(() => {
@@ -493,8 +598,6 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
   }, [isManualMode, fromEmployeeId, toEmployeeId]);
 
   const toggleTestCase = (testCaseId: number) => {
-    if (!canSelectTestCases) return;
-
     setSelectedTestCaseIds((previous) =>
       previous.includes(testCaseId)
         ? previous.filter((id) => id !== testCaseId)
@@ -503,8 +606,6 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
   };
 
   const handleSelectAll = (event: React.ChangeEvent<HTMLInputElement>) => {
-    if (!canSelectTestCases) return;
-
     const allIds = filteredTestCases.map((testCase) => testCase.testcaseId);
     setSelectedTestCaseIds(event.target.checked ? allIds : []);
   };
@@ -583,6 +684,8 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
     }
 
     try {
+      await bulkAssignOwner(Number(targetEmployeeId), selectedTestCaseIds);
+
       selectedTestCaseIds.forEach((id) => {
         mockDb.updateTestCase(id, { assignedQaId: Number(targetEmployeeId) });
       });
@@ -735,7 +838,7 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
                   setSelectedModuleId(event.target.value);
                   setSelectedSubmoduleId("");
                 }}
-                disabled={!selectedReleaseId || testCaseLoading}
+                disabled={!selectedReleaseId}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
               >
                 <option value="">{selectedReleaseId ? "All modules" : "Select a release first"}</option>
@@ -776,7 +879,6 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
                     value={fromEmployeeId}
                     onChange={(event) => {
                       setFromEmployeeId(event.target.value);
-                      setSelectedTestCaseIds([]);
                     }}
                     disabled={!selectedReleaseId}
                     className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
@@ -816,7 +918,6 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
                   value={selectedQaId}
                   onChange={(event) => {
                     setSelectedQaId(event.target.value);
-                    setSelectedTestCaseIds([]);
                   }}
                   disabled={qaLoading || !selectedReleaseId}
                   className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:ring-2 focus:ring-blue-500 focus:border-blue-500 disabled:bg-gray-100"
@@ -884,17 +985,14 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
                   type="checkbox"
                   checked={allFilteredSelected}
                   onChange={handleSelectAll}
-                  disabled={!canSelectTestCases}
-                  className="disabled:cursor-not-allowed"
+                  className="rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                 />
                 <span className="text-sm font-medium text-gray-700">
                   Select All ({filteredTestCases.length})
                 </span>
-                {!canSelectTestCases && (
-                  <span className="text-xs text-gray-400 ml-2">
-                    {isManualMode
-                      ? "Select both From and To QA to enable selection"
-                      : "Select a QA member to enable selection"}
+                {selectedTestCaseIds.length > 0 && (
+                  <span className="text-xs text-blue-600 font-medium ml-2">
+                    ({selectedTestCaseIds.length} selected)
                   </span>
                 )}
               </div>
@@ -903,18 +1001,13 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
                 {paginatedTestCases.map((testCase) => (
                   <div key={testCase.testcaseId} className="relative group">
                     <label
-                      className={`flex items-start gap-3 p-4 ${
-                        canSelectTestCases
-                          ? "hover:bg-gray-50 cursor-pointer"
-                          : "opacity-60 cursor-not-allowed"
-                      }`}
+                      className="flex items-start gap-3 p-4 hover:bg-gray-50 cursor-pointer"
                     >
                       <input
                         type="checkbox"
                         checked={selectedTestCaseIds.includes(testCase.testcaseId)}
                         onChange={() => toggleTestCase(testCase.testcaseId)}
-                        disabled={!canSelectTestCases}
-                        className="mt-1 disabled:cursor-not-allowed"
+                        className="mt-1 rounded border-gray-300 text-blue-600 focus:ring-blue-500 cursor-pointer"
                       />
 
                       <div className="flex-1 min-w-0">
@@ -997,7 +1090,7 @@ export const StandaloneQAAllocationTab: React.FC<StandaloneQAAllocationTabProps>
             <Button
               type="button"
               onClick={handleSave}
-              disabled={saving || selectedTestCaseIds.length === 0 || !canSelectTestCases}
+              disabled={saving || !canSaveAllocation}
             >
               {saving ? (
                 <Loader2 className="w-4 h-4 mr-2 animate-spin" />

@@ -2606,23 +2606,12 @@ const handleSelectAll = (checked: boolean, displayTestCases: any[]) => {
       }));
     }
   } else {
-    
-    if (allocationMode === "bulk" || allocationMode === "many-to-many") {
-      if (checked) {
-        
-        const allIds = displayTestCases.map((tc: any) => String(tc.id));
-        console.log('Selecting all test case IDs:', allIds);
-        setSelectedTestCases(allIds);
-      } else {
-        setSelectedTestCases([]);
-      }
+    // Release Allocation: allow selecting all test cases at once in any allocation mode
+    if (checked) {
+      const allIds = displayTestCases.map((tc: any) => String(tc.id));
+      setSelectedTestCases(allIds);
     } else {
-      
-      if (checked && displayTestCases.length > 0) {
-        setSelectedTestCases([String(displayTestCases[0].id)]);
-      } else {
-        setSelectedTestCases([]);
-      }
+      setSelectedTestCases([]);
     }
   }
 };
@@ -2642,169 +2631,90 @@ const handleSelectTestCase = (testCaseId: string, checked: boolean) => {
       }));
     }
   } else {
-    
-    if (allocationMode === "one-to-one" || allocationMode === "one-to-many") {
-      if (checked) {
-        setSelectedTestCases([testCaseId]); 
-      } else {
-        setSelectedTestCases([]);
-      }
+    // Release Allocation: allow selecting multiple test cases at once
+    if (checked) {
+      setSelectedTestCases(prev => prev.includes(testCaseId) ? prev : [...prev, testCaseId]);
     } else {
-      if (checked) {
-        setSelectedTestCases(prev => [...prev, testCaseId]);
-      } else {
-        setSelectedTestCases(prev => prev.filter(id => id !== testCaseId));
-      }
+      setSelectedTestCases(prev => prev.filter(id => id !== testCaseId));
     }
   }
 };
 
-
-
-  
-
   const TestCaseTable = ({ testCases }: { testCases?: any[] }) => {
-
-    
-
     const displayTestCases = (() => {
-
       if (activeTab === "qa" && qaAllocatedTestCasesData.length > 0) {
-
-        
-
         return qaAllocatedTestCasesData.map((tc: allocated_testcase_details) => ({
-
           id: tc.id, 
-
           testCaseId: tc.testCaseId,
-
           description: tc.description,
-
           steps: tc.steps,
-
           type: tc.type,
-
           severity: tc.severity
-
         }));
-
       }
 
       return testCases || allocatedTestCases;
-
     })();
 
-
-
     return (
-
       <Card>
-
         <CardContent className="p-0">
-
           <table className="w-full">
-
             <thead className="bg-gray-50">
-
               <tr className="border-b border-gray-200">
-
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-
                   <input
                     type="checkbox"
                     checked={
                       activeTab === "qa"
                         ? (selectedReleaseForQA ? ((selectedTestCasesForQA[selectedReleaseForQA]?.length ?? 0) === displayTestCases.length && displayTestCases.length > 0) : false)
-                        : (allocationMode === "one-to-one" || allocationMode === "one-to-many")
-                          ? (selectedTestCases.length === 1 && displayTestCases.length > 0)
-                          : (selectedTestCases.length === displayTestCases.length && displayTestCases.length > 0)
+                        : (selectedTestCases.length === displayTestCases.length && displayTestCases.length > 0)
                     }
                     onChange={(e) => handleSelectAll(e.target.checked, displayTestCases)}
                     className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
                   />
-
                 </th>
 
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-
                   Test Case ID
-
                 </th>
 
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-
                   Description
-
                 </th>
 
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-
                   Steps
-
                 </th>
 
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-
                   Type
-
                 </th>
 
                 <th className="px-6 py-3 text-left text-xs font-medium text-gray-500 uppercase tracking-wider">
-
                   Severity
-
                 </th>
-
-
-
               </tr>
-
             </thead>
 
             <tbody className="bg-white divide-y divide-gray-200">
-
               {displayTestCases.map((tc: any) => {
-
                 const testCaseId = tc.id || tc.testCaseId;
-
                 return (
-
                   <tr key={testCaseId} className="hover:bg-gray-50">
-
                     <td className="px-6 py-4 whitespace-nowrap">
-
                       <input
-
                         type="checkbox"
-
                         checked={
-
                           activeTab === "qa"
-
                             ? (selectedReleaseForQA ? (selectedTestCasesForQA[selectedReleaseForQA]?.includes(String(testCaseId)) ?? false) : false)
-
                             : selectedTestCases.includes(String(tc.id))
-
                         }
-
- disabled={
-    activeTab !== "qa" &&
-    (allocationMode === "one-to-one" || allocationMode === "one-to-many") &&
-    !selectedTestCases.includes(String(tc.id)) &&
-    selectedTestCases.length >= 1
-  }
-
                         onChange={(e) =>
-
                            handleSelectTestCase(String(tc.id), e.target.checked) 
-
                         }
-
                         className="rounded border-gray-300 text-blue-600 focus:ring-blue-500"
-
                       />
-
                     </td>
 
                     <td className="px-6 py-4 whitespace-nowrap text-sm text-gray-500">

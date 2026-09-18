@@ -611,7 +611,7 @@ class MockDbStore {
     const newDefect: MockDefect = {
       id: newId,
       defectId: defectData.defectId || `DEF-${Math.floor(100 + Math.random() * 900)}`,
-      title: defectData.title || defectData.description || 'New Defect',
+      title: defectData.title || defectData.description || 'Defect',
       description: defectData.description || defectData.title || '',
       priority: (defectData.priority as any) || 'medium',
       priorityId: defectData.priorityId || 2,

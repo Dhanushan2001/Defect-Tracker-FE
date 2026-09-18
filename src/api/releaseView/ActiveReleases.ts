@@ -1,4 +1,4 @@
-import { mockDb } from "../../mock/mockData";
+import apiClient from "../../lib/api";
 
 export interface ActiveRelease {
   id: string;
@@ -19,20 +19,33 @@ export interface ActiveReleasesResponse {
 }
 
 export const getActiveReleases = async (projectId: string | number): Promise<ActiveReleasesResponse> => {
-  const releases = mockDb.getReleases(Number(projectId));
-  return {
-    message: 'Success',
-    status: 'success',
-    statusCode: '200',
-    data: releases.map(r => ({
-      id: String(r.id),
-      releaseId: String(r.id),
-      name: r.name || r.releaseName || 'Release',
-      description: r.description || '',
-      status: r.status || 'In Progress',
-      releaseDate: r.releaseDate || '2026-09-30',
-      releaseType_id: String(r.releaseTypeId || 1),
-      project_id: Number(projectId),
-    })),
-  };
+  try {
+    const response = await apiClient.get(`/api/v1/project/${projectId}/release/active`);
+    const list = response.data?.data || response.data || [];
+    const releases = Array.isArray(list) ? list : [];
+    releases.sort((a: any, b: any) => Number(a.id) - Number(b.id));
+
+    return {
+      message: 'Success',
+      status: 'success',
+      statusCode: '200',
+      data: releases.map((r: any) => ({
+        id: String(r.id),
+        releaseId: String(r.id),
+        name: r.name || r.releaseName || 'Release',
+        description: r.description || '',
+        status: r.status || 'In Progress',
+        releaseDate: r.releaseDate || '',
+        releaseType_id: String(r.releaseTypeId || r.releaseType_id || (r.releaseType ? r.releaseType.id : 1)),
+        project_id: Number(projectId),
+      })),
+    };
+  } catch (error) {
+    return {
+      message: 'Error',
+      status: 'error',
+      statusCode: '500',
+      data: [],
+    };
+  }
 };

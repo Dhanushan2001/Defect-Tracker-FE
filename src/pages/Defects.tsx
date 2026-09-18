@@ -944,24 +944,24 @@ const filteredDefects = backendDefects.filter((d) => {
     // Build payload according to the API specification
 
     const payload: any = {
+      title: formData.description,
       description: formData.description,
       stepsToRecreation: formData.steps,
+      steps: formData.steps,
       expectedResult: "",
       actualResult: "",
-      isAddTestCase: formData.testCaseRequired,
-      subModuleId: Number(formData.subModuleId),
+      isAddTestCase: formData.testCaseRequired ?? true,
+      projectId: Number(selectedProjectId || (formData as any).projectId || 1),
+      moduleId: formData.moduleId ? Number(formData.moduleId) : undefined,
+      subModuleId: formData.subModuleId ? Number(formData.subModuleId) : undefined,
       severityId: Number(formData.severityId),
       priorityId: Number(formData.priorityId),
-
       defectTypeId: Number(formData.typeId),
-      releaseId: Number(formData.releaseId),
-
+      releaseId: formData.releaseId ? Number(formData.releaseId) : undefined,
       assignedTo: formData.assigntoId ? Number(formData.assigntoId) : null,
-
+      reportedBy: (formData as any).assignbyId ? Number((formData as any).assignbyId) : (user?.id ? Number(user.id) : undefined),
       testCaseId: formData.testCaseId ? Number(formData.testCaseId) : null,
     };
-    // Remove testCaseId as it's commented out in the specification
-    // testCaseId: formData.testCaseId ? Number(formData.testCaseId) : null,
 
     console.warn("Submitting defect with payload:", payload);
 
@@ -990,14 +990,17 @@ const filteredDefects = backendDefects.filter((d) => {
       response = await addDefects(form as any);
       console.warn("📡 Add defect API response:", response);
 
-      // Check for success - API returns "Success" (uppercase) or statusCode 2000
+      // Check for success - API returns "Success" (uppercase), "created", 201, or 200
       if (
         response.status?.toLowerCase() === "created" ||
+        response.status?.toLowerCase() === "success" ||
         response.statusCode === 2000 ||
-        response.statusCode === 201
+        response.statusCode === 201 ||
+        response.statusCode === 200
       ) {
         // Handle successful defect addition
         showAlert("Defect added successfully!");
+        setIsModalOpen(false);
         await fetchData(); // Always re-fetch and map data after add
         resetForm();
       } else {
@@ -1446,7 +1449,10 @@ const filteredDefects = backendDefects.filter((d) => {
 
       setDefectStatuses(mappedStatuses);
       if (mappedStatuses.length > 0) {
-        const defaultStatusId = mappedStatuses[0].id.toString();
+        const newStatus = mappedStatuses.find(
+          (s: any) => (s.statusName || "").toLowerCase() === "new"
+        );
+        const defaultStatusId = (newStatus || mappedStatuses[0]).id.toString();
         setFormData((prev) => ({ ...prev, statusId: defaultStatusId }));
       }
     } catch (error) {
@@ -1476,7 +1482,7 @@ const filteredDefects = backendDefects.filter((d) => {
     if (!deleteConfirm.defectId) return closeDeleteConfirm();
     try {
       const defect = backendDefects.find(
-        (d) => d.defectId === deleteConfirm.defectId,
+        (d) => d.defectId === deleteConfirm.defectId || String(d.id) === String(deleteConfirm.defectId),
       );
       if (!defect) {
         showAlert("Defect not found.");
@@ -1484,8 +1490,14 @@ const filteredDefects = backendDefects.filter((d) => {
         return;
       }
       const response = await deleteDefectById(defect.id.toString());
-      if (response.status === "Success" || response.statusCode === 2000) {
+      if (
+        response.status === "Success" ||
+        response.status === "success" ||
+        response.statusCode === 2000 ||
+        response.statusCode === 200
+      ) {
         showAlert("Defect deleted successfully.");
+        closeDeleteConfirm();
         await fetchData();
       } else {
         showAlert("Delete failed. Please try again.");
@@ -1546,16 +1558,18 @@ const filteredDefects = backendDefects.filter((d) => {
     if (defect) {
       setViewingDefectDetails({
         ...defect,
-        module: defect.module_name,
-        submodule: defect.sub_module_name,
-        type: defect.defect_type_name,
+        description: defect.description || defect.title || "",
+        module: defect.module_name || (defect as any).moduleName || "-",
+        submodule: defect.sub_module_name || (defect as any).subModuleName || "-",
+        type: defect.defect_type_name || (defect as any).defectTypeName || (defect as any).type || "-",
         severity: defect.severity_name,
         priority: defect.priority_name,
+        name: defect.priority_name,
         status: defect.defect_status_name,
         assignedTo: defect.assigned_to_name,
         enteredBy: defect.assigned_by_name,
-        release: defect.release_name,
-        commentCount: defect.commentCount,
+        release: defect.release_name || "-",
+        commentCount: defect.commentCount || (defect as any).commentsCount || 0,
       });
 
       setIsViewDefectDetailsModalOpen(true);
@@ -2717,7 +2731,7 @@ React.useEffect(() => {
     setIsHistoryLoading(true);
     setHistoryError(null);
     try {
-      const defect = backendDefects.find((d) => d.defectId === defectId);
+      const defect = backendDefects.find((d) => d.defectId === defectId || String(d.id) === String(defectId));
       if (!defect) {
         setHistoryError("Defect not found");
         setViewingDefectHistory([]);
@@ -2740,7 +2754,7 @@ React.useEffect(() => {
     setNewCommentText("");
 
     // Find the defect to get the numeric ID
-    const defect = backendDefects.find((d) => d.defectId === defectId);
+    const defect = backendDefects.find((d) => d.defectId === defectId || String(d.id) === String(defectId));
     if (!defect) {
       showAlert("Defect not found for comments.");
       return;
@@ -3986,18 +4000,20 @@ React.useEffect(() => {
                               onClick={() => {
                                 setViewingDefectDetails({
                                   defectId: defect.defectId,
-                                  description: defect.description,
+                                  description: defect.description || defect.title || "",
                                   steps: defect.steps,
-                                  module: defect.module_name,
-                                  submodule: defect.sub_module_name,
-                                  type: defect.defect_type_name,
+                                  module: defect.module_name || (defect as any).moduleName || "-",
+                                  submodule: defect.sub_module_name || (defect as any).subModuleName || "-",
+                                  type: defect.defect_type_name || (defect as any).defectTypeName || (defect as any).type || "-",
                                   severity: defect.severity_name,
                                   name: defect.priority_name,
+                                  priority: defect.priority_name,
                                   status: defect.defect_status_name,
                                   assignedTo: defect.assigned_to_name,
                                   enteredBy: defect.assigned_by_name,
                                   release:
                                     (defect as any).release_name?.toString() ||
+                                    (defect as any).releaseName?.toString() ||
                                     releaseMap[
                                       (defect as any).releaseId || ""
                                     ] ||

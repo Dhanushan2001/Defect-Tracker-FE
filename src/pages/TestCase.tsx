@@ -23,6 +23,7 @@ import { getAllProjects } from "../api/projectget";
 import {
   getTestCasesByProjectAndSubmodule,
   getTestCasesByProjectAndModule,
+  getTestCasesByProject,
   deleteTestCase,
 } from "../api/testCase/testCaseApi";
 import { getSeverities } from "../api/severity";
@@ -99,8 +100,13 @@ export const TestCase: React.FC = () => {
   >({});
   const fetchAllTestCasesForProject = async (_projId: string) => {
     try {
-      const testCases = mockDb.getTestCases();
-      const merged = testCases.map((tc: any) => ({
+      let testCases = [];
+      try {
+        testCases = await getTestCasesByProject(_projId);
+      } catch {
+        testCases = mockDb.getTestCases();
+      }
+      const merged = (testCases || []).map((tc: any) => ({
         ...tc,
         id: tc.id,
         no: tc.testcaseNo || tc.no,
@@ -1474,10 +1480,15 @@ export const TestCase: React.FC = () => {
 
     setIsExporting(true);
     try {
-      const testCasesList = mockDb.getTestCases();
+      let testCasesList: any[] = [];
+      try {
+        testCasesList = await getTestCasesByProject(selectedProjectId);
+      } catch {
+        testCasesList = mockDb.getTestCases();
+      }
       const headers = ["Test Case No", "Description", "Severity", "Defect Type", "Module", "Submodule"];
       const rows = testCasesList.map(t => [
-        t.testcaseNo,
+        t.testcaseNo || t.no || `TC-${t.id}`,
         `"${(t.description || '').replace(/"/g, '""')}"`,
         t.severityName || 'Medium',
         t.defectTypeName || 'Functional Bug',
@@ -1832,16 +1843,53 @@ export const TestCase: React.FC = () => {
                       params.append("size", "100000");
 
                       
-                      let raw = mockDb.getTestCases(selectedSubmoduleId ? Number(selectedSubmoduleId) : undefined);
-                      if (searchFilters.description) {
-                        const term = searchFilters.description.toLowerCase();
-                        raw = raw.filter(tc => (tc.description || '').toLowerCase().includes(term));
-                      }
-                      if (searchFilters.typeId) {
-                        raw = raw.filter(tc => tc.defectTypeId === Number(searchFilters.typeId));
-                      }
-                      if (searchFilters.severityId) {
-                        raw = raw.filter(tc => tc.severityId === Number(searchFilters.severityId));
+                      let raw: any[] = [];
+                      try {
+                        if (selectedSubmoduleId) {
+                          raw = await getTestCasesByProjectAndSubmodule(
+                            selectedProjectId,
+                            selectedSubmoduleId,
+                            searchFilters.description,
+                            searchFilters.typeId ? Number(searchFilters.typeId) : undefined,
+                            searchFilters.severityId ? Number(searchFilters.severityId) : undefined
+                          );
+                        } else if (selectedModuleId) {
+                          raw = await getTestCasesByProjectAndModule(selectedProjectId, selectedModuleId);
+                          if (searchFilters.description) {
+                            const term = searchFilters.description.toLowerCase();
+                            raw = raw.filter((tc: any) => (tc.description || '').toLowerCase().includes(term));
+                          }
+                          if (searchFilters.typeId) {
+                            raw = raw.filter((tc: any) => tc.defectTypeId === Number(searchFilters.typeId));
+                          }
+                          if (searchFilters.severityId) {
+                            raw = raw.filter((tc: any) => tc.severityId === Number(searchFilters.severityId));
+                          }
+                        } else {
+                          raw = await getTestCasesByProject(selectedProjectId);
+                          if (searchFilters.description) {
+                            const term = searchFilters.description.toLowerCase();
+                            raw = raw.filter((tc: any) => (tc.description || '').toLowerCase().includes(term));
+                          }
+                          if (searchFilters.typeId) {
+                            raw = raw.filter((tc: any) => tc.defectTypeId === Number(searchFilters.typeId));
+                          }
+                          if (searchFilters.severityId) {
+                            raw = raw.filter((tc: any) => tc.severityId === Number(searchFilters.severityId));
+                          }
+                        }
+                      } catch {
+                        raw = mockDb.getTestCases(selectedSubmoduleId ? Number(selectedSubmoduleId) : undefined);
+                        if (searchFilters.description) {
+                          const term = searchFilters.description.toLowerCase();
+                          raw = raw.filter((tc: any) => (tc.description || '').toLowerCase().includes(term));
+                        }
+                        if (searchFilters.typeId) {
+                          raw = raw.filter((tc: any) => tc.defectTypeId === Number(searchFilters.typeId));
+                        }
+                        if (searchFilters.severityId) {
+                          raw = raw.filter((tc: any) => tc.severityId === Number(searchFilters.severityId));
+                        }
                       }
 
                       const normalized = raw.map((tc: any) => {

@@ -148,6 +148,7 @@ auto">
                       Project Management
                     </NavLink>
                   )}
+
                   {can.testCase.view && (
                     <NavLink
                       to={`/projects/${selectedProjectId}/test-cases`}

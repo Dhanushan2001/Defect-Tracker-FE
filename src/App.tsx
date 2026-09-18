@@ -254,6 +254,8 @@ const AppRoutes: React.FC = () => {
           }
         />
 
+
+
         <Route
           path="/projects/:projectId/releases/:releaseId/details"
           element={

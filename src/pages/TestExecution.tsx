@@ -944,8 +944,6 @@ export const TestExecution: React.FC = () => {
         const counts: { [key: string]: number } = {};
 
         try {
-          
-
           for (const module of modules) {
             const testCases = await getTestCasesByFilter({
               projectId: parseInt(selectedProject),
@@ -955,9 +953,11 @@ export const TestExecution: React.FC = () => {
               moduleId: module.id,
             });
 
-            console.log(`Module ${module.moduleName} test cases:`, testCases);
+            console.log(`Module ${module.moduleName || module.name} test cases:`, testCases);
 
-            counts[module.moduleName || module.name] = testCases.length;
+            const count = Array.isArray(testCases) ? testCases.length : 0;
+            if (module.name) counts[module.name] = count;
+            if (module.moduleName) counts[module.moduleName] = count;
           }
 
           setModuleTestCaseCounts(counts);
@@ -987,15 +987,16 @@ export const TestExecution: React.FC = () => {
         const counts: { [key: string]: number } = {};
 
         try {
-          
-
+          const currentMod = modules.find(
+            (m: any) => m.moduleName === selectedModule || m.name === selectedModule,
+          );
           for (const submodule of submodules) {
             const testCases = await getTestCasesByFilter({
               projectId: parseInt(selectedProject),
 
               releaseId: parseInt(selectedRelease),
 
-             moduleId: modules.find((m: any) => m.moduleName === selectedModule || m.name === selectedModule)?.id,
+              moduleId: currentMod?.id,
 
               subModuleId: submodule.id,
             });
@@ -1005,8 +1006,9 @@ export const TestExecution: React.FC = () => {
               testCases,
             );
 
-            counts[submodule.subModuleName || submodule.name] =
-              testCases.length;
+            const count = Array.isArray(testCases) ? testCases.length : 0;
+            if (submodule.name) counts[submodule.name] = count;
+            if (submodule.subModuleName) counts[submodule.subModuleName] = count;
           }
 
           setSubmoduleTestCaseCounts(counts);
@@ -1655,15 +1657,21 @@ useEffect(() => {
     setExecutionStatuses({});
 
     try {
-      const moduleObj = modules.find((m: any) => m.name === moduleName);
+      const moduleObj = modules.find((m: any) => m.name === moduleName || m.moduleName === moduleName);
 
       if (moduleObj && moduleObj.id) {
         // Fetch submodules
         const response = await getSubmodulesByModule(Number(moduleObj.id));
-        const submods = response?.data;
-        console.log("getSubmodulesByModule",submods);
+        let submods = response?.data;
+        if (!submods || submods.length === 0) {
+          if (moduleObj.submodules && moduleObj.submodules.length > 0) {
+            submods = moduleObj.submodules;
+          }
+        }
+        console.log("getSubmodulesByModule", submods);
         
-        setSubmodules(Array.isArray(submods) ? submods : []);
+        const validSubmods = Array.isArray(submods) ? submods : [];
+        setSubmodules(validSubmods);
         
         if (selectedProject && selectedRelease) {
           setTestCasesLoading(true);
@@ -1680,14 +1688,15 @@ useEffect(() => {
           const mappedTestCases = testCases.map((tc: any) => {
               return {
                 ...tc,
-                backendId: tc.id,          
+                backendId: tc.backendId || tc.id,
+                releaseTestCaseId: tc.releaseTestCaseId || tc.backendId || tc.id,
                 id: tc.id?.toString(),
                 testCaseId: tc.no || tc.testCaseId,
                 description: tc.description || "",
                 steps: tc.detailsSteps || tc.steps || "No steps provided",
                 type: tc.defectTypeName || tc.type || "functional",
                 severity: tc.severityName?.toLowerCase() || tc.severity || "medium",
-                module: tc.moduleName || "Unknown Module",
+                module: tc.moduleName || moduleName || "Unknown Module",
                 subModule: tc.subModuleName || "",
                 executionStatus: tc.status || "",
                 assignedTo: tc.assignedTo || null,
@@ -1743,65 +1752,71 @@ useEffect(() => {
     setFilteredTestCases([]);
     setExecutionStatuses({});
     
-    const moduleObj = modules.find((m: any) => m.name === selectedModule);
+    const moduleObj = modules.find((m: any) => m.name === selectedModule || m.moduleName === selectedModule);
 
     const submoduleObj = submodules.find(
-      (s: any) => (s.name) === submoduleName,
+      (s: any) => s.name === submoduleName || s.subModuleName === submoduleName,
     );
 
     if (moduleObj && moduleObj.id && submoduleObj && submoduleObj.id) {
       if (selectedProject && selectedRelease) {
-        const testCases = await getTestCasesByFilter({
-          projectId: parseInt(selectedProject),
+        setTestCasesLoading(true);
+        try {
+          const testCases = await getTestCasesByFilter({
+            projectId: parseInt(selectedProject),
 
-          releaseId: parseInt(selectedRelease),
+            releaseId: parseInt(selectedRelease),
 
-          moduleId: moduleObj.id,
+            moduleId: moduleObj.id,
 
-          subModuleId: submoduleObj.id,
-        });
+            subModuleId: submoduleObj.id,
+          });
 
-        console.log("Raw submodule test cases from API:", testCases);
+          console.log("Raw submodule test cases from API:", testCases);
 
-        
+         const mappedTestCases = testCases.map((tc: any) => {
+            return {
+              ...tc,
+              backendId: tc.backendId || tc.id,
+              releaseTestCaseId: tc.releaseTestCaseId || tc.backendId || tc.id,
+              id: tc.id?.toString(),
+              testCaseId: tc.no || tc.testCaseId,
+              description: tc.description || "",
+              steps: tc.detailsSteps || tc.steps || "No steps provided",
+              type: tc.defectTypeName || tc.type || "functional",
+              severity: tc.severityName?.toLowerCase() || tc.severity || "medium",
+              module: tc.moduleName || selectedModule || " ",
+              subModule: tc.subModuleName || submoduleName || "",
+              executionStatus: tc.status,
+              assignedTo: tc.assignedTo || null,
+              assignedToId: tc.assignedToId || null,      
+              defectId: tc.defectNo || null,          
+              priority: tc.priorityName || null,     
+              projectId: String(selectedProject),
+              releaseId: selectedRelease,
+            };
+          });
+          setFilteredTestCases(mappedTestCases);
+          console.log("Mapped submodule test cases:", mappedTestCases);
 
-       const mappedTestCases = testCases.map((tc: any) => {
-          return {
-            ...tc,
-            backendId: tc.id,             
-            id: tc.id?.toString(),
-            testCaseId: tc.no || tc.testCaseId,
-            description: tc.description || "",
-            steps: tc.detailsSteps || tc.steps || "No steps provided",
-            type: tc.defectTypeName || tc.type || "functional",
-            severity: tc.severityName?.toLowerCase() || tc.severity || "medium",
-            module: tc.moduleName  || " ",
-            subModule: tc.subModuleName || "",
-            executionStatus: tc.status,
-            assignedTo: tc.assignedTo || null,
-            assignedToId: tc.assignedToId || null,      
-            defectId: tc.defectNo || null,          
-            priority: tc.priorityName || null,     
-            projectId: String(selectedProject),
-            releaseId: selectedRelease,
-          };
-        });
-        setFilteredTestCases(mappedTestCases);
-        console.log("Mapped submodule test cases:", mappedTestCases);
+          // Update execution statuses with database values, preserving localStorage values where database has no status
 
-        // Update execution statuses with database values, preserving localStorage values where database has no status
+          const databaseStatuses: { [key: string]: TestCase["executionStatus"] } =
+            {};
 
-        const databaseStatuses: { [key: string]: TestCase["executionStatus"] } =
-          {};
+          mappedTestCases.forEach((tc: any) => {
+            if (tc.executionStatus && tc.executionStatus !== "not-started") {
+              databaseStatuses[tc.id] = tc.executionStatus;
+            }
+          });
 
-        mappedTestCases.forEach((tc: any) => {
-          if (tc.executionStatus && tc.executionStatus !== "not-started") {
-            databaseStatuses[tc.id] = tc.executionStatus;
-          }
-        });
-
-       setExecutionStatuses(databaseStatuses);
-
+         setExecutionStatuses(databaseStatuses);
+        } catch (testCaseError: any) {
+          console.error("Error fetching test cases for submodule:", testCaseError);
+          setFilteredTestCases([]);
+        } finally {
+          setTestCasesLoading(false);
+        }
       }
     }
   };
@@ -1820,11 +1835,11 @@ useEffect(() => {
 
         try {
           const moduleObj = modules.find(
-            (m: any) => m.name === selectedModule,
+            (m: any) => m.name === selectedModule || m.moduleName === selectedModule,
           );
           const submoduleObj = selectedSubmodule
             ? submodules.find(
-                (s: any) => ( s.name) === selectedSubmodule,
+                (s: any) => s.name === selectedSubmodule || s.subModuleName === selectedSubmodule,
               )
             : null;
 
@@ -1879,7 +1894,8 @@ useEffect(() => {
 
             return {
               ...tc,
-              backendId: tc.id,
+              backendId: tc.backendId || tc.id,
+              releaseTestCaseId: tc.releaseTestCaseId || tc.backendId || tc.id,
               id: tc.id?.toString(),
               module: tc.moduleName ||selectedModule || "Unknown Module",
               subModule:tc.subModuleName || selectedSubmodule || "Unknown Submodule",
@@ -2955,10 +2971,39 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
       throw new Error("Missing release or test case information.");
     }
 
+    const severityObj = severities && severities.find(
+      (s: any) =>
+        (s.severity || s.name || "").toLowerCase() ===
+        (defectFormData.severity || "").toLowerCase()
+    );
+    const defectTypeObj = defectTypes && defectTypes.find(
+      (t: any) =>
+        (t.name || t.type || "").toLowerCase() ===
+        (defectFormData.type || "").toLowerCase()
+    );
+
+    const modObj = modules && modules.find((m: any) => m.name === tc.module || m.moduleName === tc.module);
+    const submodObj = submodules && submodules.find((s: any) => s.name === tc.subModule || s.subModuleName === tc.subModule);
+
+    const assignedUserObj = defectAllocatedUsers && defectAllocatedUsers.find((u: any) => String(u.userId || u.empId) === String(defectFormData.assignedTo));
+    const resolvedDevName = assignedUserObj?.userName || null;
+
     const payload = {
+      title: defectFormData.title || `Defect for Test Case ${tc.testCaseId || tc.no || tc.id}`,
+      description: defectFormData.description || tc.description || "",
+      steps: defectFormData.steps || tc.steps || "",
       status: "FAILED",
+      projectId: Number(selectedProject || tc.projectId),
+      releaseId: Number(selectedRelease || tc.releaseId),
+      moduleId: tc.moduleId ? Number(tc.moduleId) : (modObj?.id ? Number(modObj.id) : undefined),
+      subModuleId: tc.subModuleId ? Number(tc.subModuleId) : (submodObj?.id ? Number(submodObj.id) : undefined),
+      testCaseId: Number(tc.backendId || tc.id),
       priorityId: Number(priorityObj.id),
+      severityId: severityObj?.id ? Number(severityObj.id) : undefined,
+      defectTypeId: defectTypeObj?.id ? Number(defectTypeObj.id) : undefined,
+      defectStatusId: 1,
       assignedTo: Number(defectFormData.assignedTo),
+      reportedBy: AuthService.getCurrentUser()?.id || undefined,
     };
 
     const formData = new FormData();
@@ -2980,9 +3025,9 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
 
     console.log("Status update response:", response);
 
-    const defectNo = response?.data?.defectNo || null;
-    const executerDefectName = response?.data?.assignedTo || null;
-    const priorityName = response?.data?.priorityName || null;
+    const defectNo = response?.data?.defectNo || `DEF-${String(response?.data?.id || 1).padStart(3, "0")}`;
+    const executerDefectName = response?.data?.assignedTo || resolvedDevName || null;
+    const priorityName = response?.data?.priorityName || priorityObj.priority || priorityObj.name || null;
 
     setFilteredTestCases((prev) =>
       prev.map((t) =>
@@ -2990,8 +3035,13 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
           ? {
               ...t,
               executionStatus: "failed",
+              status: "failed",
               defectId: defectNo,
+              defectNo: defectNo,
               executerDefect: executerDefectName,
+              assignedDev: executerDefectName,
+              assignedDevName: executerDefectName,
+              assignedTo: executerDefectName,
               priority: priorityName,
             }
           : t
@@ -3193,7 +3243,7 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
   }
 
   // ✅ Fetch submodule-allocated developers for the dropdown
-  const subModuleId = testCase.subModuleId; // numeric ID from testCase
+  const subModuleId = testCase.subModuleId || (submodules && submodules.find((s: any) => s.name === testCase.subModule || s.subModuleName === testCase.subModule)?.id);
   if (subModuleId && selectedProject) {
     setDefectAllocatedUsersLoading(true);
     try {
@@ -3202,24 +3252,28 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
         getDevelopersWithRolesByProjectId(selectedProject).catch(() => []),
       ]);
 
-      const assignedEmployeeIds = new Set(
-        (subModuleDevRes?.data || []).map((d: any) => Number(d.employeeId))
-      );
-      const users = Array.isArray(projectDevsRaw)
-        ? projectDevsRaw
-        : projectDevsRaw?.data || projectDevsRaw?.users || [];
-      const mappedUsers = users
-        .map((user: any) => ({
+      const subDevs = subModuleDevRes?.data || [];
+      if (Array.isArray(subDevs) && subDevs.length > 0) {
+        const directDevs = subDevs.map((d: any) => ({
+          userId: d.employeeId || d.id,
+          userName: d.employeeName || `Employee ${d.employeeId || d.id}`,
+          empId: d.employeeId || d.id,
+        }));
+        setDefectAllocatedUsers(directDevs);
+      } else {
+        const users = Array.isArray(projectDevsRaw)
+          ? projectDevsRaw
+          : projectDevsRaw?.data || projectDevsRaw?.users || [];
+        const mappedUsers = users.map((user: any) => ({
           userId: user.employeeId || user.userId || user.id,
           userName:
             user.firstName && user.lastName
               ? `${user.firstName} ${user.lastName}`.trim()
               : user.userName || user.name || "Unknown User",
           empId: user.employeeId || user.userId || user.id,
-        }))
-        .filter((u: any) => u.userId && u.userName && assignedEmployeeIds.has(Number(u.userId)));
-
-      setDefectAllocatedUsers(mappedUsers);
+        }));
+        setDefectAllocatedUsers(mappedUsers);
+      }
     } catch (error) {
       console.error("Failed to fetch developers for submodule:", error);
       setDefectAllocatedUsers([]);
@@ -3234,14 +3288,13 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
   setDefectModalOpen(testCase.id);
 };
 
-  
-
   if (selectedRelease) {
     const currentRelease =
-      releases && releases.find((r) => r.id === selectedRelease);
+      (projectReleaseCard && projectReleaseCard.find((r: any) => String(r.id) === String(selectedRelease) || String(r.releaseId) === String(selectedRelease))) ||
+      (releases && releases.find((r: any) => String(r.id) === String(selectedRelease) || String(r.releaseId) === String(selectedRelease)));
 
     const currentProject =
-      projects && projects.find((p) => p.id === selectedProject);
+      projects && projects.find((p: any) => String(p.id) === String(selectedProject) || String(p.projectId) === String(selectedProject));
 
     
 
@@ -3291,7 +3344,7 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
               </h1>
 
               <p className="text-sm text-gray-500">
-                {currentProject?.name} - {currentRelease?.name}
+                {currentProject?.name || currentProject?.projectName} - {currentRelease?.name || currentRelease?.releaseName}
               </p>
             </div>
 
@@ -3337,21 +3390,26 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
                     </span>
                   ) : modules.length > 0 ? (
                     modules.map((module) => {
+                      const modName = module.name || module.moduleName;
                       const moduleTestCaseCount =
-                        moduleTestCaseCounts[ module.name] || 0;
+                        moduleTestCaseCounts[module.name] ??
+                        moduleTestCaseCounts[module.moduleName] ??
+                        moduleTestCaseCounts[modName] ?? 0;
 
                       return (
                         <Button
-                          key={ module.id}
+                          key={module.id}
                           variant={
-                            selectedModule ===  module.name
+                            selectedModule === module.name ||
+                            selectedModule === module.moduleName ||
+                            selectedModule === modName
                               ? "primary"
                               : "secondary"
                           }
-                          onClick={() => handleModuleSelect( module.name)}
+                          onClick={() => handleModuleSelect(modName)}
                           className="whitespace-nowrap m-2"
                         >
-                          { module.name} ({moduleTestCaseCount})
+                          {modName} ({moduleTestCaseCount})
                         </Button>
                       );
                     })
@@ -3416,30 +3474,30 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
                     </span>
                   ) : submodulesToShow.length > 0 ? (
                     submodulesToShow.map((submodule: any) => {
-                      console.log("submodulesToShow",submodule);
-                      
+                      const subName = submodule.name || submodule.subModuleName;
                       const submoduleTestCaseCount =
-                        submoduleTestCaseCounts[
-                          submodule.name
-                        ] || 0;
+                        submoduleTestCaseCounts[submodule.name] ??
+                        submoduleTestCaseCounts[submodule.subModuleName] ??
+                        submoduleTestCaseCounts[subName] ?? 0;
 
                       return (
                         <Button
                           key={submodule.id}
                           variant={
-                            selectedSubmodule ===
-                            (submodule.name)
+                            selectedSubmodule === submodule.name ||
+                            selectedSubmodule === submodule.subModuleName ||
+                            selectedSubmodule === subName
                               ? "primary"
                               : "secondary"
                           }
                           onClick={() =>
                             handleSubmoduleSelect(
-                               submodule.name,
+                               subName,
                             )
                           }
                           className="whitespace-nowrap m-2"
                         >
-                          {submodule.name} (
+                          {subName} (
                           {submoduleTestCaseCount})
                         </Button>
                       );
@@ -3696,6 +3754,13 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
 
                                     
                                     setExecutionStatuses((prev) => ({ ...prev, [testCase.id]: "passed" }));
+                                    setFilteredTestCases((prev) =>
+                                      prev.map((t) =>
+                                        t.id === testCase.id
+                                          ? { ...t, executionStatus: "passed", status: "passed" }
+                                          : t
+                                      )
+                                    );
                                     if (selectedProject && selectedRelease) {
                                       persistExecutionStatus(selectedProject, selectedRelease, testCase.id, "passed" as ExecutionStatus);
                                     }
@@ -4479,8 +4544,10 @@ const handleDefectFormSubmit = async (e: React.FormEvent) => {
                               ) : (
                                 (() => {
                                   const count =
-                                    releaseTestCaseCounts[release.releaseId] ||
-                                    releaseTestCaseCounts[release.id] ||
+                                    releaseTestCaseCounts[release.releaseId] ??
+                                    releaseTestCaseCounts[release.id] ??
+                                    release.testCaseCount ??
+                                    release.test_case_count ??
                                     0;
                                   return count;
                                 })()

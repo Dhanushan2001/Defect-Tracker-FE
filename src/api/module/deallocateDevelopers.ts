@@ -1,6 +1,12 @@
+import apiClient from "../../lib/api";
 import { mockDb } from "../../mock/mockData";
 
 export const deallocateModuleLeaderWithAllocateModuleId = async (allocateModuleId: number) => {
+  try {
+    await apiClient.delete(`/api/v1/allocate-module-leader/${allocateModuleId}`);
+  } catch (err) {
+    console.error("Failed to delete module leader allocation:", err);
+  }
   return { status: 'success', message: 'Deallocated successfully', data: { allocateModuleId } };
 };
 
@@ -9,6 +15,14 @@ export const deallocateDeveloperFromModule = async (
   moduleId: number,
   userId: number
 ) => {
+  try {
+    await apiClient.delete(`/api/v1/module/${moduleId}/allocated-leader`);
+  } catch (err) {
+    console.error("Failed to deallocate leader by module:", err);
+  }
+  try {
+    mockDb.updateModule(moduleId, { leaderId: undefined, leaderName: undefined, assignedDev: null });
+  } catch (_) {}
   return { status: 'success', message: 'Developer deallocated from module', data: { projectId, moduleId, userId } };
 };
 

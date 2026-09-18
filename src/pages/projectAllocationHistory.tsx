@@ -93,24 +93,62 @@ useEffect(() => {
           historyData = response;
         }
 
-        const mappedHistory = historyData.map((item: any) => ({
-          userId: item.employeeId || item.userId || item.id,
-          allocations: [
-            {
-              id: item.id,
-              firstName: item.firstName || '',
-              lastName: item.lastName || '',
-              email: item.email || '',
-              roleName: item.roleName || '',
-              roleId: item.roleId,
-              percentage: item.allocationPercent || item.percentage || 0,
-              startDate: item.startDate,
-              endDate: item.endDate,
-              status: item.status ?? true,
-            },
-          ],
-          deallocations: [],
-        }));
+        const userGroups: { [key: number]: any } = {};
+        historyData.forEach((item: any) => {
+          const uId = item.employeeId || item.userId || item.id;
+          if (!uId) return;
+          if (!userGroups[uId]) {
+            userGroups[uId] = {
+              userId: uId,
+              allocations: [],
+              deallocations: [],
+              allMovements: [],
+            };
+          }
+          const isDeallocated = item.action === 'DEALLOCATED' || item.status === false;
+          const record = {
+            id: item.id,
+            firstName: item.firstName || '',
+            lastName: item.lastName || '',
+            userFullName: item.userFullName || `${item.firstName || ''} ${item.lastName || ''}`.trim(),
+            projectName: item.projectName || '',
+            email: item.email || '',
+            roleName: item.roleName || '',
+            roleId: item.roleId,
+            projectId: item.projectId,
+            userId: uId,
+            percentage: item.allocationPercent ?? item.allocationPercentage ?? item.percentage ?? 0,
+            allocationPercentage: item.allocationPercentage ?? item.allocationPercent ?? item.percentage ?? 0,
+            startDate: item.startDate,
+            endDate: item.endDate,
+            status: !isDeallocated,
+            action: item.action || (isDeallocated ? 'DEALLOCATED' : 'ALLOCATED'),
+            createdAt: item.createdAt,
+          };
+          if (isDeallocated) {
+            userGroups[uId].deallocations.push(record);
+          }
+          userGroups[uId].allMovements.push(record);
+        });
+
+        const mappedHistory = Object.values(userGroups).map((user: any) => {
+          user.allMovements.sort((a: any, b: any) => {
+            const timeA = new Date(a.createdAt || a.startDate || 0).getTime();
+            const timeB = new Date(b.createdAt || b.startDate || 0).getTime();
+            if (timeB !== timeA) return timeB - timeA;
+            return (b.id || 0) - (a.id || 0);
+          });
+
+          user.deallocations.sort((a: any, b: any) => {
+            const timeA = new Date(a.createdAt || a.startDate || 0).getTime();
+            const timeB = new Date(b.createdAt || b.startDate || 0).getTime();
+            if (timeB !== timeA) return timeB - timeA;
+            return (b.id || 0) - (a.id || 0);
+          });
+
+          user.allocations = [...user.allMovements];
+          return user;
+        });
 
         setAllocationHistory(mappedHistory);
       })
@@ -416,8 +454,13 @@ const handleProjectSelect = (id: string) => {
                             <h5 className="font-semibold text-gray-900 mb-3">Allocation History</h5>
                             {((user.allocations && user.allocations.length > 0) || (user.deallocations && user.deallocations.length > 0)) ? (
                               <div className="space-y-3">
-                                {[...(user.allocations || []), ...(user.deallocations || [])]
-                                  .sort((a, b) => new Date(a.startDate).getTime() - new Date(b.startDate).getTime())
+                                {[...new Map([...(user.allocations || []), ...(user.deallocations || [])].map((r: any) => [r.id, r])).values()]
+                                  .sort((a, b) => {
+                                    const timeA = new Date(a.createdAt || a.startDate || 0).getTime();
+                                    const timeB = new Date(b.createdAt || b.startDate || 0).getTime();
+                                    if (timeA !== timeB) return timeA - timeB;
+                                    return (a.id || 0) - (b.id || 0);
+                                  })
                                   .map((record, idx) => (
                                     <div key={user.userId + '-' + record.id + '-' + idx} className="bg-white p-3 rounded-lg border">
                                       <div className="flex items-center justify-between mb-2">
